@@ -25,7 +25,7 @@
 
 - [x] Roadmap и проектная память: `roadmap.md`, `PROJECT_MEMORY.md` (2026-09-14)
 - [x] Каркас: `package.json`/`tsconfig.json` (strict, ESM), `config.yaml` (все пороги/бюджеты ТЗ §19) + zod-валидация, доменные типы (ТЗ §7–§8) (2026-09-14)
-- [ ] Стейт-машина статусов (candidate→queued→canary→active→deprecated→archived): допустимые переходы, запись в `decisions` на каждый переход (actor, reason, evidence) + юнит-тесты
+- [x] Стейт-машина статусов (candidate→queued→canary→active→deprecated→archived): допустимые переходы, запись в `decisions` на каждый переход (actor, reason, evidence) + юнит-тесты (2026-09-14)
 - [ ] Гейты G1–G5 (evidence, dedup, conflict, scope, budget) на мок-LLM + DDL `db/schema.sql` (ТЗ §7.1) + юнит-тесты
 - [ ] CLI `evolve`: `item add/list/transition/show` (show — white-box drill-down, ТЗ §7.2.6) + ручной прогон кандидата через все гейты и статусы (критерий M0)
 - [ ] Компиляция (tsc) и тесты (vitest) зелёные
