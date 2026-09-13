@@ -1,0 +1,11 @@
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+graft/
+/graft/
+
+# Windows zone artifacts (Zone.Identifier)
+*:Zone.Identifier

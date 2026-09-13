@@ -1,0 +1,63 @@
+# evolve — единый конфиг: все пороги и бюджеты (ТЗ §5: «все гейты параметризованы»).
+# Смена порога = коммит конфига + запись в roadmap.md §Решения (change control).
+version: 1
+
+# --- Пороги гейтов и конвейера (ТЗ §9, §19) ---
+theta_dedup: 0.85          # G2: cos_sim с базой ≥ θ_dedup → не новый item, а merge-предложение
+canary_epsilon: 0.05       # canary-pass: success-rate(c) ≥ baseline − ε (ε = 5%)
+theta_score: 0.3           # demote: score(item, agent) < θ_score при used ≥ min_usage_for_demote
+
+# --- Canary (ТЗ §9, §9.1 cost-gate) ---
+canary:
+  window_days: 7           # окно: 7 дней ИЛИ ≥ min_retrievals (что наступит позже)
+  min_retrievals: 3
+  cost_multiplier_max: 1.2 # стоимость: токены/задачу ≤ baseline × 1.2
+
+# --- Деградация (ТЗ §9, ежедневный cron; защита от over-pruning §16) ---
+degradation:
+  min_usage_for_demote: 5      # порог demotion только при used ≥ 5
+  unused_days: 21              # 21 день без usage → deprecated
+  deprecated_to_archived_days: 30
+  max_deprecated_share_per_month: 0.2
+  open_contradiction_days: 7   # contradiction открыта > 7 дней → оба item в queue
+
+# --- Бюджеты (G5, ТЗ §9; потолок A5) ---
+budget:
+  active_max: 300
+  queue_per_week_max: 10
+  candidates_per_agent_per_day_max: 5
+
+# --- Алерты (ТЗ §12.2: только сигналы, иначе система молчит) ---
+alerts:
+  active_budget_ratio: 0.9     # active > 90% cap
+  open_contradictions_max: 5
+  success_rate_drop: 0.05      # −5% за 2 недели при росте базы
+  churn_demos_per_week_max: 5  # > 5 demotion/нед 2 недели подряд
+  queue_card_max_days: 14      # карточка в queue > 14 дней
+  cost_growth: 0.15            # токены/задачу > baseline + 15% за 2 недели
+
+# --- Retrieval (ТЗ §10.1, M2) ---
+retrieval:
+  mode: hybrid                 # hybrid | keyword | embedding
+  top_k: 5
+  rrf_k: 60                    # константа ранжирования RRF
+  weights:                     # ranking = rrf·w1 + item_score·w2 + scope·w3 − recency·w4
+    rrf_rank: 1.0
+    item_score: 0.5            # score именно для запросившего агента, fallback global
+    scope_match: 0.3
+    recency_decay: 0.2
+  budget:                      # budget-гварды (обязательные)
+    max_chars_per_item: 2000   # 0 = отключено — только как осознанный эксперимент
+    max_total_recall_chars: 8000
+    timeout_ms: 5000           # по таймауту инъекция пропускается, задача не блокируется
+
+# --- Score per (item, agent) (ТЗ §11.3) ---
+score:
+  success_rate_weight: 0.5     # score = 0.5·success_rate(used≥5) + 0.3·usage_norm + 0.2·recency
+  usage_norm_weight: 0.3
+  recency_weight: 0.2
+  min_used: 5
+
+# --- Критик-агент (ТЗ §13, M4) ---
+critic:
+  weight: 1.0                  # авто-пересчёт еженедельно по телеметрии (ложные issues снижают вес)
