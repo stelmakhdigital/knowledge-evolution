@@ -51,6 +51,14 @@ retrieval:
     max_total_recall_chars: 8000
     timeout_ms: 5000           # по таймауту инъекция пропускается, задача не блокируется
 
+# --- Ablation (ТЗ §12.4): каждый модуль — off на неделю; смена = коммит конфига ---
+ablation:
+  dedup: true
+  conflict: true
+  canary: true
+  critic: true
+  negative: true
+
 # --- Score per (item, agent) (ТЗ §11.3) ---
 score:
   success_rate_weight: 0.5     # score = 0.5·success_rate(used≥5) + 0.3·usage_norm + 0.2·recency

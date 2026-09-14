@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: фаза 6 (M5 — стабилизация): M5.1/M5.2 готовы; «первые данные/пороги по факту» — после месяца эксплуатации
+Обновлено: 2026-09-14 · Статус: фаза 6→7: M5.1/M5.2 готовы, M6.0 (harness-документ + ablation) готов; дальше M6.1 (proposer)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -45,6 +45,11 @@
 - [x] M5.1: Agent-agnostic audit — `audit agent-agnostic` (6 проверок hard-requirements ТЗ §14) — 9e42db2
 - [x] M5.2: Transfer-тест (ТЗ §14.5) — `transfer eval --profile` (top-20 self-recall на альтернативном профиле, тег transfer:weak, addTag в store)
 - [ ] M5.3 (операционное): первые данные за месяц эксплуатации — точность гейтов, пороги по факту, бюджет по факту, тонкая настройка конфига (после внедрения в реальные сессии)
+
+### Фаза 7: M6 — meta-оптимизация (исследование)
+
+- [x] M6.0: harness-документ (`harness.md`, ТЗ §5.1) + ablation-флаги (ТЗ §12.4: dedup/conflict/canary/critic/negative) + `ablation list`
+- [ ] M6.1: agentic proposer — кандидаты правок harness.md (git + diff в очередь человека); промоут только при golden success-rate ≥ baseline + 5 п.п. И cost ≤ baseline
 
 ## Требования (Must → user story)
 

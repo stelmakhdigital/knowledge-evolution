@@ -76,6 +76,12 @@ export function gateEvidence(ctx: GateContext): GateResult {
   // G1 для review/critic (ТЗ §13, M4): «верификация» — сам структурированный фидбэк:
   // task_id + transcript_hash просмотренной задачи + rating 1..5 (человек/критик — верификатор).
   if (p.sourceType === "review" || p.sourceType === "critic") {
+    if (p.sourceType === "critic" && ctx.config.ablation.critic === false) {
+      return gateResult(ctx, "evidence", "fail", {
+        ...detail,
+        reason: "критик-модуль отключён (ablation, harness.md §6) — lesson-кандидаты не принимаются",
+      });
+    }
     const rating = p.payload["rating"];
     const hasRating = typeof rating === "number" && rating >= 1 && rating <= 5;
     if (p.taskId.length === 0 || p.transcriptHash.length === 0 || !hasRating) {
@@ -105,6 +111,9 @@ export function gateEvidence(ctx: GateContext): GateResult {
 // --- G2 dedup: cos_sim с базой ≥ θ_dedup → merge-предложение ---
 
 export async function gateDedup(ctx: GateContext): Promise<GateResult> {
+  if (ctx.config.ablation.dedup === false) {
+    return gateResult(ctx, "dedup", "pass", { ablated: true, reason: "G2 off (ablation, harness.md §6)" });
+  }
   const query = ctx.llm.embed(ctx.candidate.body);
   const existing = (await ctx.store.listItems()).filter((i) => i.status !== "archived");
   let best: { id: string; similarity: number } | null = null;
@@ -195,6 +204,9 @@ export async function gateBudget(ctx: GateContext): Promise<GateResult> {
 // --- G3 conflict: LLM-детектор противоречий с active (после создания item) ---
 
 export async function gateConflict(item: Item, ctx: Omit<GateContext, "candidate"> & { candidateRef: string }): Promise<GateResult> {
+  if (ctx.config.ablation.conflict === false) {
+    return gateResult(ctx, "conflict", "pass", { ablated: true, reason: "G3 off (ablation, harness.md §6)" });
+  }
   const activeItems = await ctx.store.listItems({ status: "active" });
   for (const other of activeItems) {
     const verdict = await ctx.llm.detectConflict(item.body, other.body);
@@ -301,14 +313,22 @@ export async function admitCandidate(ctx: GateContext): Promise<AdmissionResult>
   await ctx.store.addGateResult(g3);
   const finalTier: RiskTier = g3.outcome === "fail" ? "high" : riskTier; // противоречие → в очередь к человеку
 
+  const canaryOn = ctx.config.ablation.canary !== false;
+  const toCanary = finalTier === "low" && canaryOn;
   const updated = await ctx.store.applyTransition(item.id, {
-    to: finalTier === "low" ? "canary" : "queued",
+    to: toCanary ? "canary" : "queued",
     kind: "promote",
     actor: "auto:gate",
     reason: finalTier === "low"
-      ? "risk_tier=low → canary (авто, ТЗ §9)"
+      ? canaryOn
+        ? "risk_tier=low → canary (авто, ТЗ §9)"
+        : "risk_tier=low, но canary off (ablation) → queue (человек)"
       : `risk_tier=high${g3.outcome === "fail" ? " (+противоречие)" : ""} → queue (человек, ТЗ §9)`,
-    evidence: { risk_tier: finalTier, contradiction: g3.detail["contradiction_id"] ?? null },
+    evidence: {
+      risk_tier: finalTier,
+      contradiction: g3.detail["contradiction_id"] ?? null,
+      ...(canaryOn ? {} : { canary_ablated: true }),
+    },
   });
 
   const gateRunResult: GateRunResult = g3.outcome === "fail"

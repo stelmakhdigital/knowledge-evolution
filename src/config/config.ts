@@ -71,6 +71,16 @@ export const evolveConfigSchema = z.object({
   critic: z.object({
     weight: z.number().nonnegative(),
   }),
+  /** Ablation-флаги (ТЗ §12.4): каждый модуль поддерживает режим off на неделю. */
+  ablation: z
+    .object({
+      dedup: z.boolean().default(true),
+      conflict: z.boolean().default(true),
+      canary: z.boolean().default(true),
+      critic: z.boolean().default(true),
+      negative: z.boolean().default(true),
+    })
+    .default({ dedup: true, conflict: true, canary: true, critic: true, negative: true }),
 });
 
 export type EvolveConfig = z.infer<typeof evolveConfigSchema>;

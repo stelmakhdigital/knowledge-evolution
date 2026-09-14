@@ -148,6 +148,23 @@ node dist/cli.js review record --db "$EVOLVE_DB_URL" \
 heuristic с scope=all → risk=high → queue (ручное ревью команды);
 повторный lesson → merge (G2), issue без lesson — только телеметрия.
 
+## Harness-документ и ablation (M6.0)
+
+Политика harness зафиксирована в **`harness.md`** (ТЗ §5.1): NL-документ,
+git-версируемый, diff-абельный; пороги — в `config.yaml` (change control:
+смена политики = коммит + запись в roadmap.md «Решения»). Документ обязателен
+для ablation (§12.4), transfer-тестов (§14.5) и meta-оптимизации (M6:
+proposer предлагает правки именно этого документа).
+
+Ablation (ТЗ §12.4): каждый модуль поддерживает режим off на неделю
+(`config.ablation`): dedup (G2), conflict (G3), canary (off → low в queue),
+critic (lesson-кандидаты критика отклоняются на G1), negative (не в выдаче
+retrieval). Смена флага = правка config.yaml + коммит:
+
+```bash
+node dist/cli.js ablation list
+```
+
 ## Transfer-тест (M5)
 
 Проверка переноса знаний на альтернативный профиль (ТЗ §14.5): top-20

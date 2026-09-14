@@ -38,6 +38,7 @@ export interface RetrieveResult {
 
 interface ItemRow {
   id: string;
+  type?: string;
   title: string;
   scope: string;
   tags: string[];
@@ -211,7 +212,7 @@ export function applyBudget(
 /** Загружает retrievable-элементы (активные+canary, по agent) — для ранка и ответа. */
 async function loadItems(pool: Pool, agentId: string): Promise<Map<string, ItemRow>> {
   const res = await pool.query(
-    `SELECT id, title, scope, tags, body, version, score_global AS score, created_at
+    `SELECT id, type, title, scope, tags, body, version, score_global AS score, created_at
      FROM items WHERE status IN ('active', 'canary') AND (applies_to = 'all' OR applies_to = $1)`,
     [agentId],
   );
@@ -221,7 +222,8 @@ async function loadItems(pool: Pool, agentId: string): Promise<Map<string, ItemR
 export function itemFromRow(row: ItemRow): Item {
   return {
     id: row.id,
-    type: "fact", // тип не влияет на retrieval; полный Item — в store
+    // type — из БД: нужен для ablation.negative-фильтра (ТЗ §12.4, harness.md §6)
+    type: (row.type ?? "fact") as Item["type"],
     title: row.title,
     scope: row.scope,
     tags: [...row.tags],
@@ -296,9 +298,15 @@ export async function retrieve(
     outcome.map((r) => ({ item: r.item, body: r.body })),
     config,
   );
-  // usage_log: знание было доступно ДО задачи (ТЗ §10.3) — только если task_id.
-  if (req.taskId && budgeted.items.length > 0) {
-    for (const r of budgeted.items) {
+  // Ablation (ТЗ §12.4, harness.md §6): negative-модуль off → negative не в выдаче.
+  // Индексы outcome сохраняются (filter по исходным позициям).
+  const finalItems = budgeted.items
+    .map((r, i) => ({ r, i }))
+    .filter((x) => config.ablation.negative !== false || x.r.item.type !== "negative");
+  // usage_log: знание было доступно ДО задачи (ТЗ §10.3) — только если task_id;
+  // пишется для фактически инжектируемых элементов (после ablation-фильтра).
+  if (req.taskId && finalItems.length > 0) {
+    for (const { r } of finalItems) {
       await pool.query(
         `INSERT INTO usage_log (item_id, version, agent_id, task_id, task_success, retrieved_at)
          VALUES ($1,$2,$3,$4,NULL, now())`,
@@ -307,7 +315,7 @@ export async function retrieve(
     }
   }
   return {
-    items: budgeted.items.map((r, i) => ({
+    items: finalItems.map(({ r, i }) => ({
       item: r.item,
       body: r.body,
       channels: outcome[i]?.channels ?? [],

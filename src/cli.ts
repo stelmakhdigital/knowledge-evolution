@@ -1256,6 +1256,34 @@ transferCmd
     }
   });
 
+const ablationCmd = new Command("ablation")
+  .description("ablation-модули (ТЗ §12.4): режим off на неделю, смена = коммит конфига");
+
+ablationCmd
+  .command("list")
+  .description("статус ablation-флагов из конфига (dedup/conflict/canary/critic/negative)")
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+      const modules: Record<string, string> = {
+        dedup: "G2 (дубли — merge-предложения)",
+        conflict: "G3 (детектор противоречий)",
+        canary: "canary (авто-промоут; off → low в queue)",
+        critic: "критик (lesson-кандидаты критика)",
+        negative: "negative-элементы в выдаче retrieval",
+      };
+      for (const [k, desc] of Object.entries(modules)) {
+        const on = config.ablation[k as keyof typeof config.ablation];
+        console.log(`${on ? "on " : "OFF"}  ${k.padEnd(8)} — ${desc}`);
+      }
+      console.log("смена флага = правка config.yaml + коммит (change control, harness.md §6)");
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(ablationCmd);
 program.addCommand(transferCmd);
 program.addCommand(auditCmd);
 program.addCommand(criticCmd);
