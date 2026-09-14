@@ -47,7 +47,8 @@ export const STATE_MACHINE: Readonly<Record<ItemStatus, readonly TransitionEdge[
     { to: "queued", kind: "demote", actors: ["auto", "human"] }, // drift широкий scope / contradiction > 7д
   ],
   deprecated: [
-    { to: "active", kind: "promote", actors: ["auto", "human"] }, // восстановление score / rollback (ТЗ §12.1)
+    { to: "active", kind: "promote", actors: ["auto", "human"] }, // восстановление score (М3)
+    { to: "active", kind: "rollback", actors: ["human", "auto"] }, // rollback 1-клик авто-решения (ТЗ §12.1/§15 M3)
     { to: "archived", kind: "archive", actors: ["auto", "human"] }, // 30 дней без восстановления
   ],
   archived: [], // терминальное: только archived (ТЗ §7.2.1)
@@ -66,7 +67,7 @@ export interface TransitionRequest {
  */
 export function checkTransition(req: TransitionRequest): TransitionEdge {
   const edges = STATE_MACHINE[req.from];
-  const edge = edges.find((e) => e.to === req.to);
+  const edge = edges.find((e) => e.to === req.to && e.kind === req.kind);
   if (!edge) {
     throw new InvalidTransitionError(
       `переход ${req.from} → ${req.to} запрещён стейт-машиной (допустимые: ${
@@ -90,5 +91,5 @@ export function checkTransition(req: TransitionRequest): TransitionEdge {
 
 /** Допустимые целевые статусы из текущего (для CLI/отладки). */
 export function allowedTargets(from: ItemStatus): readonly ItemStatus[] {
-  return STATE_MACHINE[from].map((e) => e.to);
+  return [...new Set(STATE_MACHINE[from].map((e) => e.to))];
 }

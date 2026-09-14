@@ -32,15 +32,19 @@
 
 ## 6. Текущее состояние (2026-09-14, свежесть ≤ 1 недели)
 
-- **Фаза: M2** — retrieval + телеметрия-score + canary.
-- Закрыто: M0 (каркас, CLI, JSON-снапшот, 80/80) и M1 (телеметрия task, экстрактор + CLI extract, очередь queue — 95/95).
-- Следующие шаги (M2.1 → M2.4):
-  1. Postgres 16 + pgvector: установка, миграция из `db/schema.sql`, `PgStore` (реализация `Store`), конфиг соединения;
-  2. Retrieval: hybrid BM25 + vector + RRF, budget-охраны (ТЗ §19), `/retrieve` (service), agent-профили;
-  3. Score по (item, agent) из usage_log + canary-цикл (окно 7д/3 извлечения, ε=5%, cost-gate) авто-решениями;
-  4. End-to-end на PG + golden-набор 30 задач (recall@5 ≥ 0.7).
-- Коммиты: fefba30, c3c01c3, 97e0a50, bb8b3ec (M0), dadfda0 (M1.1), db4cafb (M1.2), 8c5eddf (M1.3).
-- Режим: пользователь разрешил коммитить/пушить без запроса на каждом шаге (14.09); отчёты по шагам — по-русски.
+- **Фаза: M3** — отчётность, decay, drift.
+- Закрыто: M0 (каркас), M1 (телеметрия/экстрактор/очередь), M2 (Postgres+pgvector,
+  retrieval hybrid + /retrieve, score per (item,agent), canary-цикл, CLI на PG — 137/137).
+- Коммиты M2: 1277345 (M2.1), 3450651 (M2.2, recall@5=0.95), 22d6ed8 (M2.3), 00337be (M2.4, e2e).
+- Окружение: PG 16.9 + pgvector 0.7.4 в ~/.pgsql (порт 5432, БД: evolve, *_test);
+  CLI: все команды — memory (JSON) или PG (--db / EVOLVE_DB_URL), единый AsyncStore.
+- Следующие шаги (M3):
+  1. M3.1: decay (21д без usage → deprecated; 30д → archived; contradiction>7д → queue;
+     защита от over-pruning max_deprecated_share=0.2) + CLI decay run + rollback 1-клик;
+  2. M3.2: недельный отчёт + алерты (alerts-конфиг: budget, contradictions,
+     success_rate_drop, churn, queue-card, cost_growth) — CLI report weekly;
+  3. M4: критик + review-триггер; M5/M6: agent-agnostic/transfer, meta-оптимизация.
+- Режим: коммит/пуш без запроса (разрешено пользователем 14.09); отчёты — по-русски.
 
 ## 7. Глоссарий
 Термины ТЗ §6 (item, candidate, провенанс, risk-тир, canary, score, чирн, harness) — каноничное определение в `knowledge-evolution-tz.md` §6, здесь не дублируются.

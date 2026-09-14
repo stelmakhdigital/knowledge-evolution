@@ -112,6 +112,26 @@ curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"ds
 Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
 `test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
 
+## Decay и rollback (M3)
+
+Decay (деградация, ТЗ §9/§16) — ежедневная авто-логика по active-базе:
+- **unused**: ≥ 21д без использования (usage/создание) → `deprecated`;
+- **θ_score**: `score_global < 0.3` при used ≥ 5 → `deprecated`;
+- **archived**: ≥ 30д в deprecated → `archived` (с archived_reason, ТЗ §7.2.1);
+- **contradiction**: открытое противоречие > 7д → активные участники в queue;
+- **over-pruning guard**: не более 0.2 × базы demotion за календарный месяц (ТЗ §16).
+
+Все решения — `actor=auto:degradation` в decisions; **rollback одним кликом**
+(ТЗ §15 M3):
+
+```bash
+node dist/cli.js decay run --db "$EVOLVE_DB_URL"
+node dist/cli.js rollback <itemId> --db "$EVOLVE_DB_URL" [--reason "…"]
+```
+
+Rollback: `deprecated → active` (kind=rollback, actor=human) — специальное ребро
+стейт-машины для «возврата из недельного окна» (ТЗ §12.1).
+
 ## Режим Postgres в CLI (M2.4)
 
 Все команды работают и в memory-режиме (JSON-снимок, по умолчанию), и в

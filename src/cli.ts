@@ -41,6 +41,7 @@ import { asyncStoreOf, type AsyncStore } from "./store/async-store.js";
 import { retrieve } from "./retrieval/search.js";
 import { recomputeScores, itemScoreFor } from "./telemetry/score.js";
 import { evaluateCanaries } from "./canary/canary.js";
+import { runDecay } from "./decay/decay.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
 
@@ -996,6 +997,64 @@ scoresCmd
     }
   });
 
+const decayCmd = new Command("decay").description("decay/деградация: daily-логика + over-pruning guard (ТЗ §9/§16)");
+
+decayCmd
+  .command("run")
+  .description("прогнать decay: unused 21д / θ_score / deprecated 30д → archived / contradiction 7д → queue")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const actions = await runDecay(store, config, new Date());
+        if (actions.length === 0) {
+          console.log("(действий не требуется)");
+          return;
+        }
+        for (const a of actions) {
+          console.log(`${a.kind.padEnd(20)} ${a.itemId.slice(0, 8)}… — ${a.title} — ${a.reason}`);
+        }
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const rollbackCmd = new Command("rollback <id>")
+  .description("rollback авто-решения одним кликом (ТЗ §12.1/§15 M3): deprecated → active")
+  .option("--reason <text>", "причина (аудит)")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL);
+
+rollbackCmd.action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  try {
+    const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+    const backend = openBackend(globalOpts);
+    const store = backend.store;
+    const item = await store.getItem(id);
+    if (!item) {
+      throw new EvolveError("NOT_FOUND", `item ${id} не найден`);
+    }
+    if (item.status !== "deprecated") {
+      throw new EvolveError("INVALID_STATE", `rollback доступен только из status=deprecated (текущий: ${item.status})`);
+    }
+    const reason = opts["reason"] ?? "rollback авто-решения (ТЗ §12.1): возвращение в active";
+    const updated = await store.applyTransition(id, {
+      to: "active", kind: "rollback", actor: "human", reason,
+      evidence: { rolled_back_from: "deprecated" },
+    });
+    console.log(`rollback: ${shortId(updated.id)} → active (v${updated.version})`);
+    await closeBackend(backend);
+  } catch (err) {
+    fail(err);
+  }
+});
+
+program.addCommand(decayCmd);
+program.addCommand(rollbackCmd);
 program.addCommand(canaryCmd);
 program.addCommand(scoresCmd);
 program.addCommand(retrieveCmd);
