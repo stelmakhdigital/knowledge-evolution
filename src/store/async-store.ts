@@ -26,6 +26,8 @@ export interface AsyncStore {
   listItems(filter?: { status?: ItemStatus; type?: ItemType }): Promise<readonly Item[]>;
   applyTransition(itemId: string, input: TransitionInput): Promise<Item>;
   addVersion(itemId: string, body: string, decision: Omit<Decision, "id" | "itemId" | "version" | "createdAt">): Promise<Item>;
+  /** Идемпотентный тег (M5.2: transfer:weak и др.). */
+  addTag(itemId: string, tag: string): Promise<void>;
   itemVersions(itemId: string): Promise<readonly ItemVersion[]>;
   provenanceFor(itemId: string): Promise<readonly Provenance[]>;
   addGateResult(gateResult: GateResult): Promise<void>;
@@ -54,6 +56,7 @@ export function asyncStoreOf(sync: Store): AsyncStore {
     listItems: (filter) => p(() => sync.listItems(filter)),
     applyTransition: (itemId, input) => p(() => sync.applyTransition(itemId, input)),
     addVersion: (itemId, body, decision) => p(() => sync.addVersion(itemId, body, decision)),
+    addTag: (itemId, tag) => p(() => { sync.addTag(itemId, tag); }),
     itemVersions: (itemId) => p(() => sync.itemVersions(itemId)),
     provenanceFor: (itemId) => p(() => sync.provenanceFor(itemId)),
     addGateResult: (gr) => p(() => { sync.addGateResult(gr); }),

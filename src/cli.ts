@@ -46,6 +46,7 @@ import { buildWeeklyReport, renderMarkdown } from "./report/report.js";
 import { recordReview, type ReviewIssue } from "./review/review.js";
 import { latestCriticWeight, recomputeCriticWeight } from "./critic/critic.js";
 import { auditAgentAgnostic } from "./audit/agent-agnostic.js";
+import { runTransferEval } from "./audit/transfer.js";
 import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -1226,6 +1227,36 @@ auditCmd
     }
   });
 
+const transferCmd = new Command("transfer")
+  .description("transfer-тест: top-20 active на альтернативном профиле (ТЗ §14.5, M5)");
+
+transferCmd
+  .command("eval")
+  .description("self-recall top-20 active-элементов на альтернативном agent_profile; weak → тег transfer:weak")
+  .requiredOption("--profile <agentId>", "альтернативный agent_profile")
+  .option("--limit <n>", "размер подвыборки", "20")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const limit = Number(opts["limit"] ?? 20);
+        const summary = await runTransferEval(store, config, new MockLlm(), new Date(), req(opts, "profile"), limit);
+        console.log(`transfer-тест: профиль '${summary.profileAgent}', top-${summary.total}: transferred ${summary.transferred}, weak ${summary.weak}`);
+        for (const r of summary.results) {
+          const mark = r.verdict === "transferred" ? "✓" : "✗";
+          console.log(`${mark} ${r.itemId.slice(0, 8)}… ${r.title} (applies_to=${r.appliesTo}, ${r.verdict}${r.weakTagged ? ", +transfer:weak" : ""})`);
+        }
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(transferCmd);
 program.addCommand(auditCmd);
 program.addCommand(criticCmd);
 program.addCommand(reportCmd);

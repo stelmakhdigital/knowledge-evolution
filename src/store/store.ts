@@ -66,6 +66,8 @@ export interface Store {
   // --- версии (иммутабельная история) ---
   /** Новая версия тела (kind обязан быть 'approve_edit') + decision. */
   addVersion(itemId: string, body: string, decision: Omit<Decision, "id" | "itemId" | "version" | "createdAt">): Item;
+  /** Идемпотентный тег (M5.2: transfer:weak и др.). */
+  addTag(itemId: string, tag: string): void;
   itemVersions(itemId: string): readonly ItemVersion[];
 
   // --- провенанс (white-box drill-down, ТЗ §7.2.6) ---

@@ -186,6 +186,18 @@ export class PgStore implements AsyncStore {
 
   // --- версии ---
 
+  async addTag(itemId: string, tag: string): Promise<void> {
+    const res = await this.pool.query(
+      `UPDATE items SET tags = (
+         SELECT array_agg(DISTINCT t) FROM unnest(tags || array[$2]) t
+       ) WHERE id = $1 RETURNING id`,
+      [itemId, tag],
+    );
+    if (res.rowCount === 0) {
+      throw new NotFoundError(`item ${itemId} не найден`);
+    }
+  }
+
   async addVersion(itemId: string, body: string, decision: Omit<Decision, "id" | "itemId" | "version" | "createdAt">): Promise<Item> {
     if (decision.kind !== "approve_edit") {
       throw new InvariantViolationError(

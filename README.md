@@ -148,6 +148,21 @@ node dist/cli.js review record --db "$EVOLVE_DB_URL" \
 heuristic с scope=all → risk=high → queue (ручное ревью команды);
 повторный lesson → merge (G2), issue без lesson — только телеметрия.
 
+## Transfer-тест (M5)
+
+Проверка переноса знаний на альтернативный профиль (ТЗ §14.5): top-20
+active-элементов по importance (usage-подсчёт, score_global) прогоняются через
+реальный `retrieve()` на другом `agent_profile` (self-recall: запрос =
+title + tags). Перенёсся — `transferred`; нет — тег `transfer:weak`
+(не блокирует active, попадает в месячный аудит). `applies_to=<агент>` по
+определению не переносится (поведенческий урок, ТЗ §14.3) → `weak_excluded`.
+Профиль должен существовать в `agent_profiles` (harness исполним в профилях
+≥ 2 моделей — hard requirement):
+
+```bash
+node dist/cli.js transfer eval --db "$EVOLVE_DB_URL" --profile claude [--limit 20]
+```
+
 ## Agent-agnostic audit (M5)
 
 Автоматическая проверка hard-requirements ТЗ §14 (агент = `agent_id` + профиль,

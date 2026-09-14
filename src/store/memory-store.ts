@@ -111,6 +111,16 @@ export class MemoryStore implements Store {
       .map((i) => ({ ...i }));
   }
 
+  addTag(itemId: string, tag: string): void {
+    const item = this.items.get(itemId);
+    if (!item) {
+      throw new NotFoundError(`item ${itemId} не найден`);
+    }
+    if (!item.tags.includes(tag)) {
+      this.items.set(itemId, { ...item, tags: [...item.tags, tag] });
+    }
+  }
+
   applyTransition(itemId: string, input: TransitionInput): Item {
     const item = this.items.get(itemId);
     if (!item) {
