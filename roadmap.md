@@ -1,7 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: фаза 5 (M4 — критик и review-триггер), итерация 0
-Примечание: M4 ведётся 14.09 (M4.1 c1359f4, M4..2 d7…); операционное измерение M1 (20 задач) и 2-недельный критерий M4 — после внедрения в реальные сессии.
+Обновлено: 2026-09-14 · Статус: фаза 6 (M5 — agent-agnostic/transfer), итерация 0
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -34,6 +33,12 @@
 - [x] M3.1: Decay (unused 21д / θ_score 0.3 / 30д → archived / contradiction 7д → queue) + over-pruning guard 0.2/мес + rollback 1-клик (ребро deprecated→active, kind=rollback) — 087beea
 - [x] M3.2: Недельный отчёт (success-rate, canary, churn, очередь) + алерты по config.alerts («только сигналы, иначе молчит», ТЗ §12.2) — b0993ac
 - [x] M3.3: Drift — contradiction > 7д → queue (decay, 087beea) + success_rate_drop алерт (отчёт, b0993ac) + G3 conflict-гейт (M1)
+
+### Фаза 5: M4 — критик и review-триггер (неделя 7+) — закрыта 2026-09-14
+
+- [x] M4.1: Review-триггер (human|critic, rating 1..5 + issues) → `review_recorded` + lesson-кандидаты через конвейер; G1 для review/critic (rating вместо verifier); CLI `review record`; critic_weight в провенансе — c1359f4
+- [x] M4.2: Авто-вес критика (`critic reweight`: gate-pass-rate × usage-фактор, clamp 0.1..2.0, миграция 004) + секция «Критик» в `report weekly` («вес-механика видна в отчёте», порог ≥ 50% подсвечен) — e08a487
+- Примечание: 2-недельный операционный критерий M4 (≥ 50% lesson-кандидатов критика проходят гейты) — после внедрения в реальные сессии (как M1); механизм + подсветка порога в отчёте готовы
 
 ## Требования (Must → user story)
 
