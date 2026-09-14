@@ -38,6 +38,8 @@ import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
 import { PgStore } from "./store/pg-store.js";
 import { retrieve } from "./retrieval/search.js";
+import { recomputeScores, itemScoreFor } from "./telemetry/score.js";
+import { evaluateCanaries } from "./canary/canary.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
 
@@ -878,6 +880,81 @@ serveCmd.action(async (opts: Record<string, string | undefined>) => {
   }
 });
 
+const canaryCmd = new Command("canary").description("canary-цикл: авто-решения по canary-элементам (ТЗ §9)");
+
+canaryCmd
+  .command("evaluate")
+  .description("прогнать canary-оценку (окно 7д / min_retrievals / ε / cost-gate)")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const verdicts = await evaluateCanaries(store, config, new Date());
+        if (verdicts.length === 0) {
+          console.log("(canary-элементов нет)");
+          return;
+        }
+        for (const v of verdicts) {
+          console.log(`${v.outcome.padEnd(7)} ${v.itemId.slice(0, 8)}… — ${v.title} — ${v.reason}`);
+        }
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const scoresCmd = new Command("scores").description("score по (item, agent) из usage_log (ТЗ §11.3)");
+
+scoresCmd
+  .command("recompute")
+  .description("идемпотентный пересчёт всех score + score_global")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const n = await recomputeScores(store.pool, config, new Date());
+        console.log(`пересчитано пар (item, agent): ${n}`);
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+scoresCmd
+  .command("show <id>")
+  .description("score элемента: per-agent + global")
+  .option("--agent <agentId>", "ид агента", "dsh")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (id: string, opts: Record<string, string | undefined>) => {
+    try {
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const item = await store.getItem(id);
+        if (!item) {
+          throw new EvolveError("NOT_FOUND", `item ${id} не найден`);
+        }
+        const agent = await itemScoreFor(store.pool, id, req(opts, "agent"));
+        console.log(`item ${shortId(id)} (${item.status}, ${item.type})`);
+        console.log(`  score_global=${item.scoreGlobal.toFixed(3)}`);
+        console.log(`  score(${req(opts, "agent")})=${agent.score.toFixed(3)} (source=${agent.source})`);
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(canaryCmd);
+program.addCommand(scoresCmd);
 program.addCommand(retrieveCmd);
 program.addCommand(serveCmd);
 program.addCommand(migrateCmd);

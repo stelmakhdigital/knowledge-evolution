@@ -74,6 +74,24 @@ node dist/cli.js extract run --task-id task-99 --transcript-file /tmp/transcript
 Коды выхода `item add` / `extract run`: 0 — accept/merge, 1 — reject (гейт не пройден) или ошибка.
 `--verifier` обязателен для прохождения G1 (self-reported успех запрещён, ТЗ §9).
 
+## Score и canary (M2)
+
+Score по (item, agent) из usage_log (ТЗ §11.3): `0.5·success_rate(used≥5) +
+0.3·usage_norm + 0.2·recency`; без сигнала (used < min_used) — fallback на
+score_global. Пересчёт идемпотентный (`scores recompute`), источник правды —
+usage_log (score не правится вручную, ТЗ §7.2.4).
+
+Canary-цикл (ТЗ §9/§9.1): окно 7д + min 3 извлечения + ε=5% против baseline
+(success-rate активного ядра) + cost-gate ×1.2 (M2-прокси — длина тела vs
+среднее по active). Решения — `auto:canary` в decisions: pass → active,
+fail → candidate (flag), мало данных — hold.
+
+```bash
+node dist/cli.js scores recompute
+node dist/cli.js scores show <itemId> --agent dsh
+node dist/cli.js canary evaluate
+```
+
 ## Retrieval (M2)
 
 Hybrid-поиск (ТЗ §10.1): keyword-канал (FTS `simple` + pg_trgm) + vector-канал

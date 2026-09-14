@@ -25,7 +25,7 @@
 
 - [x] M2.1: Postgres 16 + pgvector (локальный кластер без sudo), миграции `db/migrations/` + CLI `evolve migrate`, `AsyncStore` + `PgStore` (контракт ТЗ §7.2 на живом PG) (2026-09-14)
 - [x] M2.2: Retrieval-сервис: hybrid (BM25 + vector + RRF, ТЗ §10.1), `/retrieve` (HTTP), budget-охраны (ТЗ §19), agent-профили (top_k/format), golden-набор 30 задач (recall@5 ≥ 0.7)
-- [ ] M2.3: Score по (item, agent) из usage_log (success_rate, used≥5) + canary-цикл авто-решениями (окно 7д/3 извлечения, ε=5%, cost-gate ×1.2, ТЗ §9)
+- [x] M2.3: Score по (item, agent) из usage_log (success_rate, used≥5) + canary-цикл авто-решениями (окно 7д/3 извлечения, ε=5%, cost-gate ×1.2, ТЗ §9)
 - [ ] M2.4: End-to-end на PG (add → retrieve → canary → active) + CLI на Postgres; критерий M2: canary-цикл без ручного вмешательства
 
 ## Требования (Must → user story)
