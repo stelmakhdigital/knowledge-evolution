@@ -74,6 +74,33 @@ node dist/cli.js extract run --task-id task-99 --transcript-file /tmp/transcript
 Коды выхода `item add` / `extract run`: 0 — accept/merge, 1 — reject (гейт не пройден) или ошибка.
 `--verifier` обязателен для прохождения G1 (self-reported успех запрещён, ТЗ §9).
 
+## Postgres (M2)
+
+Схема — `db/schema.sql` (контракт, TЗ §7.1), миграции — `db/migrations/`
+(применяются `evolve migrate`, идемпотентно, журнал `schema_migrations`).
+
+Локальный dev-кластер (этого репо, без sudo): Postgres 16.9 + pgvector 0.7.4
+собраны в `~/.pgsql`, данные в `~/pgsql/data`, порт 5432, БД — `evolve`
+(тесты — `evolve_test`, создаётся автоматически):
+
+```bash
+# поднять кластер (если не работает)
+~/.pgsql/bin/pg_ctl -D ~/pgsql/data -o "-p 5432 -k $HOME/pgsql/sock -c listen_addresses=127.0.0.1" -l /tmp/pg-server.log start
+
+# применить миграции
+node dist/cli.js migrate
+node dist/cli.js migrate --db "postgres://arka@127.0.0.1:5432/<db>"
+```
+
+Переменные: `EVOLVE_DB_URL` — connection string по умолчанию для `migrate`;
+`EVOLVE_TEST_DB_URL`/`EVOLVE_ADMIN_URL` — для контракт-тестов PG (без живого
+Postgres PG-сьют пропускается, остальные тесты не зависят от БД).
+
+`PgStore` (`src/store/pg-store.ts`) — асинхронная реализация контракта
+хранилища (`AsyncStore`, `src/store/async-store.ts`) на том же DDL; инварианты
+ТЗ §7.2 зеркалят MemoryStore и страхуются DDL (triggers/CHECK). Retrieval-
+сервис и переход CLI на Postgres — M2.2/M2.4.
+
 ## Разработка
 
 ```bash

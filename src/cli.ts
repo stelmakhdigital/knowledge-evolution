@@ -4,8 +4,10 @@
  * Единый бинарник: service + CLI (ТЗ §5) — service-часть подключается с M2.
  * M0: LLM — MockLlm (детерминированная); реальный LLM-API — M1 (ТЗ A4).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { Pool } from "pg";
 import process from "node:process";
 import { Command } from "commander";
 import { type ZodType } from "zod";
@@ -749,6 +751,67 @@ process.on("unhandledRejection", (reason) => {
   console.error("[evolve] unhandledRejection:", reason instanceof Error ? reason.stack ?? reason.message : String(reason));
   process.exit(1);
 });
+
+
+// --- миграции Postgres (M2, ТЗ §7.1) ---
+
+const DEFAULT_DB_URL = process.env["EVOLVE_DB_URL"] ?? "postgres://arka@127.0.0.1:5432/evolve";
+
+const migrateCmd = new Command("migrate")
+  .description("применить миграции db/migrations/ к Postgres (идемпотентно, schema_migrations)")
+  .option("--db <url>", "connection string (default EVOLVE_DB_URL или postgres://arka@127.0.0.1:5432/evolve)");
+
+migrateCmd.action(async (opts: Record<string, string | undefined>) => {
+  try {
+    const dbUrl = opts["db"] ?? DEFAULT_DB_URL;
+    const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    const dir = path.join(root, "db", "migrations");
+    if (!existsSync(dir)) {
+      throw new EvolveError("MIGRATIONS_NOT_FOUND", `каталог миграций не найден: ${dir}`);
+    }
+    const pool = new Pool({ connectionString: dbUrl, max: 2 });
+    try {
+      const client = await pool.connect();
+      try {
+        await client.query(
+          `CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
+        );
+        const applied = new Set(
+          (await client.query(`SELECT name FROM schema_migrations`)).rows.map((r) => r["name"] as string),
+        );
+        const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+        let n = 0;
+        for (const f of files) {
+          if (applied.has(f)) {
+            console.log(`= ${f} — уже применено`);
+            continue;
+          }
+          const sql = readFileSync(path.join(dir, f), "utf8");
+          await client.query("BEGIN");
+          try {
+            await client.query(sql);
+            await client.query(`INSERT INTO schema_migrations (name) VALUES ($1)`, [f]);
+            await client.query("COMMIT");
+          } catch (err) {
+            await client.query("ROLLBACK");
+            throw err;
+          }
+          console.log(`✓ ${f} — применено`);
+          n += 1;
+        }
+        console.log(`миграций применено: ${n} (всего файлов: ${files.length})`);
+      } finally {
+        client.release();
+      }
+    } finally {
+      await pool.end();
+    }
+  } catch (err) {
+    fail(err);
+  }
+});
+
+program.addCommand(migrateCmd);
 
 try {
   await program.parseAsync(process.argv);
