@@ -37,6 +37,7 @@ import { buildQueueCard, listQueueCards } from "./queue/queue.js";
 import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
 import { PgStore } from "./store/pg-store.js";
+import { asyncStoreOf, type AsyncStore } from "./store/async-store.js";
 import { retrieve } from "./retrieval/search.js";
 import { recomputeScores, itemScoreFor } from "./telemetry/score.js";
 import { evaluateCanaries } from "./canary/canary.js";
@@ -106,7 +107,7 @@ function indent(text: string, prefix = "    "): string {
 
 // --- программа ---
 
-const program = new Command();
+const program = new Command().option("--db <url>", "Postgres connection string (memory-режим, если не задан)");
 program
   .name("evolve")
   .description("Система эволюции знания для кодинг-агента (ТЗ knowledge-evolution-tz.md)")
@@ -120,10 +121,36 @@ interface ItemOptions {
   state?: string;
 }
 
-function openStore(opts: ItemOptions): { store: MemoryStore; statePath: string } {
+interface Backend {
+  store: AsyncStore;
+  pg: PgStore | null;
+  mem: MemoryStore | null;
+  statePath: string;
+}
+
+function openBackend(opts: ItemOptions & { db?: string }): Backend {
   loadConfig(opts.config ?? resolveConfigPath()); // валидация конфига на старте
+  const dbUrl = opts["db"];
+  if (dbUrl && dbUrl.length > 0) {
+    const pg = new PgStore({ connectionString: dbUrl });
+    return { store: pg, pg, mem: null, statePath: "" };
+  }
   const statePath = opts.state ?? stateFilePath();
-  return { store: loadStore(statePath), statePath };
+  const mem = loadStore(statePath);
+  return { store: asyncStoreOf(mem), pg: null, mem, statePath };
+}
+
+async function saveBackend(backend: Backend): Promise<void> {
+  if (backend.mem && backend.statePath.length > 0) {
+    saveStore(backend.mem, backend.statePath);
+  }
+}
+
+async function closeBackend(backend: Backend): Promise<void> {
+  await saveBackend(backend);
+  if (backend.pg) {
+    await backend.pg.close();
+  }
 }
 
 item
@@ -152,7 +179,8 @@ item
       }
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
       const config = loadConfig(globalOpts.config ?? resolveConfigPath());
-      const { store, statePath } = openStore(globalOpts);
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
       const candidate: Candidate = {
         type: type as ItemType,
         title,
@@ -179,7 +207,7 @@ item
         clock: () => new Date(),
         agentId: req(addOpts, "agent"),
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
 
       for (const g of res.gates.results) {
         console.log(`  [${g.outcome.toUpperCase().padEnd(4)}] ${g.gate.padEnd(8)} ${g.detail["reason"] ?? ""}`);
@@ -204,10 +232,11 @@ item
   .description("список элементов (фильтры: --status, --type)")
   .option("--status <status>", `статус: ${ITEM_STATUSES.join("|")}`)
   .option("--type <type>", `тип: ${ITEM_TYPES.join("|")}`)
-  .action((listOpts: { status?: string; type?: string }, cmd: Command) => {
+  .action(async (listOpts: { status?: string; type?: string }, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store } = openStore(globalOpts);
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
       const status = listOpts.status as ItemStatus | undefined;
       const type = listOpts.type as ItemType | undefined;
       if (status && !ITEM_STATUSES.includes(status)) {
@@ -223,7 +252,7 @@ item
       if (type) {
         filter.type = type;
       }
-      const rows = store.listItems(filter);
+      const rows = await store.listItems(filter);
       if (rows.length === 0) {
         console.log("(пусто)");
         return;
@@ -239,11 +268,12 @@ item
 item
   .command("show <id>")
   .description("white-box drill-down: body + провенанс + версии + decisions (ТЗ §7.2.6)")
-  .action((id: string, _opts: unknown, cmd: Command) => {
+  .action(async (id: string, _opts: unknown, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store } = openStore(globalOpts);
-      const itemRow = store.getItem(id);
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
+      const itemRow = await store.getItem(id);
       if (!itemRow) {
         throw new EvolveError("NOT_FOUND", `item ${id} не найден`);
       }
@@ -256,21 +286,21 @@ item
       }
       console.log(`  body (v${itemRow.version}, обновлено ${itemRow.updatedAt}):`);
       console.log(indent(itemRow.body));
-      const prov = store.provenanceFor(itemRow.id);
+      const prov = await store.provenanceFor(itemRow.id);
       console.log(`  provenance (${prov.length}):`);
       for (const p of prov) {
         console.log(`    - source=${p.sourceType} task=${p.taskId} commit=${p.commit} verifier=${String(p.payload["verifier"] ?? "-")} (${p.createdAt})`);
       }
-      const versions = store.itemVersions(itemRow.id);
+      const versions = await store.itemVersions(itemRow.id);
       console.log(`  versions: ${versions.map((v) => `v${v.version}${v.id === versions.at(-1)?.id ? " (current)" : ""}${v.supersededBy ? " (superseded)" : ""}`).join(", ")}`);
-      const decisions = store.decisionsFor(itemRow.id);
+      const decisions = await store.decisionsFor(itemRow.id);
       console.log(`  decisions (${decisions.length}):`);
       for (const d of decisions) {
         console.log(`    - [${d.createdAt}] ${d.kind} actor=${d.actor} — ${d.reason}`);
       }
       const candidateRef = decisions[0]?.evidence["candidate_ref"];
       if (typeof candidateRef === "string") {
-        const gates = store.gateResultsFor(candidateRef);
+        const gates = await store.gateResultsFor(candidateRef);
         if (gates.length > 0) {
           console.log(`  gate_results (${candidateRef}):`);
           for (const g of gates) {
@@ -278,7 +308,7 @@ item
           }
         }
       }
-      const open = store.listContradictions({ status: "open" }).filter((c) => c.itemAId === itemRow.id || c.itemBId === itemRow.id);
+      const open = (await store.listContradictions({ status: "open" })).filter((c) => c.itemAId === itemRow.id || c.itemBId === itemRow.id);
       if (open.length > 0) {
         console.log(`  open contradictions: ${open.map((c) => `${c.id} (vs ${shortId(c.itemAId === itemRow.id ? c.itemBId : c.itemAId)})`).join(", ")}`);
       }
@@ -301,8 +331,9 @@ item
         throw new EvolveError("INVALID_STATUS", `допустимо: ${ITEM_STATUSES.join("|")}`);
       }
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
-      const current = store.getItem(id);
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
+      const current = await store.getItem(id);
       if (!current) {
         throw new EvolveError("NOT_FOUND", `item ${id} не найден`);
       }
@@ -321,7 +352,7 @@ item
       if (edge.actors.includes(actorClassOf(actor)) === false) {
         throw new EvolveError("INVALID_ACTOR", `переход ${current.status} → ${toStatus} недоступен actor-классу '${actorClassOf(actor)}'`);
       }
-      const updated = store.applyTransition(id, {
+      const updated = await store.applyTransition(id, {
         to: toStatus,
         kind,
         actor,
@@ -329,7 +360,7 @@ item
         evidence: { from: current.status },
         ...(toStatus === "archived" ? { archivedReason: transOpts["archivedReason"] ?? "" } : {}),
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`${shortId(id)}: ${current.status} → ${updated.status} (kind=${kind}, actor=${actor})`);
     } catch (err) {
       fail(err);
@@ -340,11 +371,12 @@ item
 item
   .command("allowed <id>")
   .description("допустимые следующие статусы для item")
-  .action((id: string, _opts: unknown, cmd: Command) => {
+  .action(async (id: string, _opts: unknown, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store } = openStore(globalOpts);
-      const it = store.getItem(id);
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
+      const it = await store.getItem(id);
       if (!it) {
         throw new EvolveError("NOT_FOUND", `item ${id} не найден`);
       }
@@ -375,10 +407,11 @@ task
   .description("task_started: регистрация задачи")
   .requiredOption("--agent <agentId>", "ид агента")
   .option("--scope-hints <hints>", "scope-подсказки через запятую", "")
-  .action((taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  .action(async (taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
       const event = validated(taskStartedSchema, {
         event: "task_started",
         task_id: taskId,
@@ -386,8 +419,8 @@ task
         scope_hints: (opts["scopeHints"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
         started_at: new Date().toISOString(),
       });
-      store.addEvent(event);
-      saveStore(store, statePath);
+      await store.addEvent(event);
+      await saveBackend(backend);
       console.log(`task_started: ${taskId} (agent=${event.agent_id})`);
     } catch (err) {
       fail(err);
@@ -399,11 +432,12 @@ task
   .description("knowledge_used: запись в usage_log ДО начала задачи (ТЗ §10.3)")
   .requiredOption("--agent <agentId>", "ид агента")
   .requiredOption("--item <id>", "id элемента (active/canary)")
-  .action((taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  .action(async (taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
-      const itemRow = store.getItem(req(opts, "item"));
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
+      const itemRow = await store.getItem(req(opts, "item"));
       if (!itemRow) {
         throw new EvolveError("NOT_FOUND", `item ${req(opts, "item")} не найден`);
       }
@@ -421,8 +455,8 @@ task
         agent_id: req(opts, "agent"),
         used_at: new Date().toISOString(),
       });
-      store.addEvent(event);
-      store.addUsage({
+      await store.addEvent(event);
+      await store.addUsage({
         id: `u-${hashBody(`${taskId}:${itemRow.id}:${itemRow.version}:${req(opts, "agent")}`).slice(0, 12)}`,
         itemId: itemRow.id,
         version: itemRow.version,
@@ -431,7 +465,7 @@ task
         taskSuccess: null,
         retrievedAt: event.used_at,
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`knowledge_used: ${taskId} ← item ${shortId(itemRow.id)} v${itemRow.version}`);
     } catch (err) {
       fail(err);
@@ -447,13 +481,14 @@ task
   .requiredOption("--verifier <v>", "tests|lint|smoke|human")
   .option("--verifier-id <id>", "конкретный верификатор (ablation, ТЗ §11.4)")
   .option("--human-override", "ручное переопределение вердикта", false)
-  .action((taskId: string, opts: Record<string, string | boolean | undefined>, cmd: Command) => {
+  .action(async (taskId: string, opts: Record<string, string | boolean | undefined>, cmd: Command) => {
     try {
       if (Boolean(opts["success"]) === Boolean(opts["fail"])) {
         throw new TelemetryError("VERIFY_FLAGS", "укажите ровно одно из --success/--fail");
       }
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
       const verifier = req(opts, "verifier");
       const event = validated(taskVerifiedSchema, {
         event: "task_verified",
@@ -465,9 +500,9 @@ task
         ...(opts["humanOverride"] ? { human_override: true } : {}),
         verified_at: new Date().toISOString(),
       });
-      store.addEvent(event);
-      const { updated, unchanged } = store.backfillUsageForTask(taskId, event.success);
-      saveStore(store, statePath);
+      await store.addEvent(event);
+      const { updated, unchanged } = await store.backfillUsageForTask(taskId, event.success);
+      await saveBackend(backend);
       console.log(
         `task_verified: ${taskId} success=${event.success} (${event.verifier}/${event.verifier_id}) — usage_log обновлено: ${updated}, без изменений: ${unchanged}`,
       );
@@ -479,11 +514,12 @@ task
 task
   .command("show <taskId>")
   .description("события задачи + состояние usage_log")
-  .action((taskId: string, _opts: unknown, cmd: Command) => {
+  .action(async (taskId: string, _opts: unknown, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store } = openStore(globalOpts);
-      const events = store.listEvents({ taskId });
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
+      const events = await store.listEvents({ taskId });
       if (events.length === 0) {
         console.log(`(нет событий для задачи ${taskId})`);
         return;
@@ -499,7 +535,7 @@ task
           console.log(`- [${e.recorded_at}] review_recorded source=${e.source} rating=${e.rating} issues=${e.issues.length}`);
         }
       }
-      const usage = store.usageForTask(taskId);
+      const usage = await store.usageForTask(taskId);
       if (usage.length > 0) {
         console.log(`usage_log: ${usage.map((u) => `${shortId(u.itemId)}→${u.taskSuccess === null ? "?" : u.taskSuccess ? "success" : "fail"}`).join(", ")}`);
       }
@@ -536,7 +572,8 @@ extract
       }
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
       const config = loadConfig(globalOpts.config ?? resolveConfigPath());
-      const { store, statePath } = openStore(globalOpts);
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
       const taskId = req(opts, "taskId");
       const agentId = req(opts, "agent");
       const transcriptHash = `sha256:${hashBody(transcript)}`;
@@ -551,7 +588,7 @@ extract
       });
       if (extraction.candidates.length === 0) {
         console.log(`кандидатов не извлечено. notes: ${extraction.notes || "—"}`);
-        saveStore(store, statePath);
+        await saveBackend(backend);
         return;
       }
       console.log(`извлечено кандидатов: ${extraction.candidates.length}`);
@@ -591,7 +628,7 @@ extract
       if (extraction.notes.length > 0) {
         console.log(`notes: ${extraction.notes}`);
       }
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`итого: accept=${accepted}, merge=${merged}, reject=${rejected}`);
       if (accepted === 0 && merged === 0) {
         process.exit(1);
@@ -608,12 +645,13 @@ const queue = new Command("queue").description("очередь high-risk: кар
 queue
   .command("list")
   .description("карточки очереди (age, цена бездействия, stale)")
-  .action((_opts: unknown, cmd: Command) => {
+  .action(async (_opts: unknown, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
       const config = loadConfig(globalOpts.config ?? resolveConfigPath());
-      const { store } = openStore(globalOpts);
-      const cards = listQueueCards(store, config, new Date());
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
+      const cards = await listQueueCards(store, config, new Date());
       if (cards.length === 0) {
         console.log("(очередь пуста)");
         return;
@@ -639,16 +677,17 @@ queue
 queue
   .command("show <id>")
   .description("полная карточка: body, провенанс, гейты, противоречия (ТЗ §12.1)")
-  .action((id: string, _opts: unknown, cmd: Command) => {
+  .action(async (id: string, _opts: unknown, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
       const config = loadConfig(globalOpts.config ?? resolveConfigPath());
-      const { store } = openStore(globalOpts);
-      const itemRow = store.getItem(id);
+      const backend = openBackend(globalOpts);
+        const store = backend.store;
+      const itemRow = await store.getItem(id);
       if (!itemRow || itemRow.status !== "queued") {
         throw new EvolveError("NOT_IN_QUEUE", `item ${id} не в очереди (статус: ${itemRow?.status ?? "нет"})`);
       }
-      const card = buildQueueCard(itemRow, store, config, new Date());
+      const card = await buildQueueCard(itemRow, store, config, new Date());
       console.log(`карточка ${itemRow.id} — ${itemRow.title}`);
       console.log(`  type=${itemRow.type} risk=${itemRow.riskTier} scope=${itemRow.scope} age=${card.daysInQueue}д costOfInaction=${card.costOfInaction}${card.stale ? ` [STALE > ${config.alerts.queue_card_max_days}д]` : ""}`);
       console.log(`  body:`);
@@ -667,7 +706,8 @@ queue
           console.log(`    - vs ${shortId(otherId)} (severity=${c.severity}, ${c.id})`);
         }
       }
-      console.log(`  решения: ${store.decisionsFor(itemRow.id).map((d) => `${d.kind}(${d.actor})`).join(", ")}`);
+      const queueDecisions = await store.decisionsFor(itemRow.id);
+      console.log(`  решения: ${queueDecisions.map((d) => `${d.kind}(${d.actor})`).join(", ")}`);
     } catch (err) {
       fail(err);
     }
@@ -677,18 +717,19 @@ queue
   .command("accept <id>")
   .description("принять: queued → canary (actor=human)")
   .option("--reason <text>", "причина (в decisions)", "принято в недельном окне")
-  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
-      const updated = store.applyTransition(id, {
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
+      const updated = await store.applyTransition(id, {
         to: "canary",
         kind: "promote",
         actor: "human",
         reason: req(opts, "reason"),
         evidence: { source: "queue" },
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`${shortId(id)}: queued → ${updated.status} (actor=human)`);
     } catch (err) {
       fail(err);
@@ -700,24 +741,25 @@ queue
   .description("принять с правкой: новая версия (approve_edit) + queued → canary")
   .requiredOption("--body <text>", "новое тело знания")
   .option("--reason <text>", "почему правка (в decisions)", "принято с правкой в недельном окне")
-  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
-      const updated = store.addVersion(id, req(opts, "body"), {
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
+      const updated = await store.addVersion(id, req(opts, "body"), {
         kind: "approve_edit",
         actor: "human",
         reason: req(opts, "reason"),
         evidence: { source: "queue" },
       });
-      const after = store.applyTransition(id, {
+      const after = await store.applyTransition(id, {
         to: "canary",
         kind: "promote",
         actor: "human",
         reason: "принято с правкой → canary (ТЗ §12.1)",
         evidence: { version: updated.version },
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`${shortId(id)}: v${after.version}, queued → ${after.status} (actor=human)`);
     } catch (err) {
       fail(err);
@@ -728,11 +770,12 @@ queue
   .command("reject <id>")
   .description("отклонить: queued → archived, причина обязательная (ТЗ §12.1)")
   .requiredOption("--reason <text>", "причина отклонения (строится в decisions; экстрактор учитывает частые причины)")
-  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const globalOpts = cmd.optsWithGlobals() as ItemOptions;
-      const { store, statePath } = openStore(globalOpts);
-      const updated = store.applyTransition(id, {
+      const backend = openBackend(globalOpts);
+      const store = backend.store;
+      const updated = await store.applyTransition(id, {
         to: "archived",
         kind: "reject",
         actor: "human",
@@ -740,7 +783,7 @@ queue
         archivedReason: req(opts, "reason"),
         evidence: { source: "queue" },
       });
-      saveStore(store, statePath);
+      await saveBackend(backend);
       console.log(`${shortId(id)}: queued → ${updated.status} (actor=human, reason: ${req(opts, "reason")})`);
     } catch (err) {
       fail(err);

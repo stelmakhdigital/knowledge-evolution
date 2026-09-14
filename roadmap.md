@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: фаза 3 (M2 — retrieval + телеметрия + canary), итерация 0
+Обновлено: 2026-09-14 · Статус: фаза 4 (M3 — отчётность, decay, drift), итерация 0
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -12,7 +12,7 @@
 | 0 Discovery (ТЗ) | ✅ 2026-09-14 | ТЗ v0.3 | ТЗ принято как рабочая база |
 | 1 M0 — каркас | ✅ 2026-09-14 | M0 | Кандидат вручную прогнан через все гейты и статусы (CLI, live-прогон 14.09); каждый переход оставляет запись в `decisions` (аудит-трейл 5 decisions в `item show`) |
 | 2 M1 — экстрактор + гейты | ✅ 2026-09-14* | M1 | Функционально: конвейер extract→гейты→очередь (95/95 тестов); *операционный критерий (20 реальных задач, ≥ 70% через G1–G5, ложных ≤ 3) — замер на реальных сессиях DSH |
-| 3 M2 — retrieval + телеметрия + canary | ⬜* | M2 | Golden-набор 30 задач: recall@5 ≥ 0.7; canary-цикл end-to-end без ручного вмешательства |
+| 3 M2 — retrieval + телеметрия + canary | ✅ 2026-09-14* | M2 | Golden-набор 30 задач: recall@5 ≥ 0.7; canary-цикл end-to-end без ручного вмешательства |
 | 4 M3 — отчётность, decay, drift | ⬜* | M3 | Недельное окно ≤ 20 мин; rollback любого авто-решения — 1 клик |
 | 5 M4 — критик и review-триггер | ⬜* | M4 | ≥ 50% lesson-кандидатов критика проходят гейты; вес-механика видна в отчёте |
 | 6 M5/M6 — стабилизация, meta-оптимизация | ⬜* | M5 | agent-agnostic (ТЗ §14) + transfer-тест (ТЗ §14.5) на втором профиле |
@@ -26,7 +26,7 @@
 - [x] M2.1: Postgres 16 + pgvector (локальный кластер без sudo), миграции `db/migrations/` + CLI `evolve migrate`, `AsyncStore` + `PgStore` (контракт ТЗ §7.2 на живом PG) (2026-09-14)
 - [x] M2.2: Retrieval-сервис: hybrid (BM25 + vector + RRF, ТЗ §10.1), `/retrieve` (HTTP), budget-охраны (ТЗ §19), agent-профили (top_k/format), golden-набор 30 задач (recall@5 ≥ 0.7)
 - [x] M2.3: Score по (item, agent) из usage_log (success_rate, used≥5) + canary-цикл авто-решениями (окно 7д/3 извлечения, ε=5%, cost-gate ×1.2, ТЗ §9)
-- [ ] M2.4: End-to-end на PG (add → retrieve → canary → active) + CLI на Postgres; критерий M2: canary-цикл без ручного вмешательства
+- [x] M2.4: End-to-end на PG (add → retrieve → canary → active, демо 14.09) + CLI на Postgres (все команды --db/EVOLVE_DB_URL, единый AsyncStore-путь); canary-цикл без ручного вмешательства — canary evaluate (2026-09-14)
 
 ## Требования (Must → user story)
 

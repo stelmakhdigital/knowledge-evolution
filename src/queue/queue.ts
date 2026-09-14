@@ -1,6 +1,6 @@
 import type { EvolveConfig } from "../config/config.js";
 import type { Contradiction, GateResult, Item, Provenance } from "../domain/types.js";
-import type { Store } from "../store/store.js";
+import type { AsyncStore } from "../store/async-store.js";
 
 /**
  * Карточка high-risk кандидата в очереди (ТЗ §12.1):
@@ -26,20 +26,20 @@ export interface QueueCard {
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function buildQueueCard(
+export async function buildQueueCard(
   item: Item,
-  store: Store,
+  store: AsyncStore,
   config: EvolveConfig,
   now: Date,
-): QueueCard {
-  const provenanceRefs = store.provenanceFor(item.id);
+): Promise<QueueCard> {
+  const provenanceRefs = await store.provenanceFor(item.id);
   // candidate_ref из evidence первого decision → gate_results кандидата.
-  const candidateRef = store.decisionsFor(item.id)[0]?.evidence["candidate_ref"];
+  const candidateRef = (await store.decisionsFor(item.id))[0]?.evidence["candidate_ref"];
   const gateResults =
-    typeof candidateRef === "string" ? store.gateResultsFor(candidateRef) : [];
-  const openContradictions = store
-    .listContradictions({ status: "open" })
-    .filter((c) => c.itemAId === item.id || c.itemBId === item.id);
+    typeof candidateRef === "string" ? await store.gateResultsFor(candidateRef) : [];
+  const openContradictions = (await store.listContradictions({ status: "open" })).filter(
+    (c) => c.itemAId === item.id || c.itemBId === item.id,
+  );
 
   const daysInQueue = Math.max(
     0,
@@ -50,7 +50,8 @@ export function buildQueueCard(
   // Цена бездействия: другие неархивированные элементы с общим тегом (≥1) + сам элемент.
   const tags = new Set(item.tags);
   let cost = 1;
-  for (const other of store.listItems()) {
+  const allItems = await store.listItems();
+  for (const other of allItems) {
     if (other.id === item.id || other.status === "archived") {
       continue;
     }
@@ -71,14 +72,14 @@ export function buildQueueCard(
 }
 
 /** Список карточек очереди: по цене бездействия (убыв), затем старейшие первыми. */
-export function listQueueCards(
-  store: Store,
+export async function listQueueCards(
+  store: AsyncStore,
   config: EvolveConfig,
   now: Date,
-): readonly QueueCard[] {
-  return store
-    .listItems({ status: "queued" })
-    .map((item) => buildQueueCard(item, store, config, now))
+): Promise<readonly QueueCard[]> {
+  const queued = await store.listItems({ status: "queued" });
+  const cards = await Promise.all(queued.map((item) => buildQueueCard(item, store, config, now)));
+  return cards
     .sort(
       (a, b) =>
         b.costOfInaction - a.costOfInaction ||

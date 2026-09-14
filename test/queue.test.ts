@@ -51,19 +51,19 @@ function seedQueued(id: string, body: string, tags: readonly string[], queuedAt:
 }
 
 describe("buildQueueCard (ТЗ §12.1)", () => {
-  it("возраст и stale по порогу алерта (queue_card_max_days=14)", () => {
+  it("возраст и stale по порогу алерта (queue_card_max_days=14)", async () => {
     const fresh = seedQueued("fresh", "свежая карточка о секретах в логах", ["secrets"], "2026-09-10T12:00:00Z");
-    const card = buildQueueCard(fresh.getItem("fresh") as Item, fresh, CONFIG, NOW);
+    const card = await buildQueueCard(fresh.getItem("fresh") as Item, fresh, CONFIG, NOW);
     expect(card.daysInQueue).toBe(4);
     expect(card.stale).toBe(false);
 
     const old = seedQueued("old", "старая карточка о секретах в логах", ["secrets"], "2026-08-01T12:00:00Z");
-    const cardOld = buildQueueCard(old.getItem("old") as Item, old, CONFIG, NOW);
+    const cardOld = await buildQueueCard(old.getItem("old") as Item, old, CONFIG, NOW);
     expect(cardOld.daysInQueue).toBeGreaterThan(CONFIG.alerts.queue_card_max_days);
     expect(cardOld.stale).toBe(true);
   });
 
-  it("цена бездействия: общие теги увеличивают cost", () => {
+  it("цена бездействия: общие теги увеличивают cost", async () => {
     const s = seedQueued("a", "карточка о миграциях базы данных", ["db"], "2026-09-13T12:00:00Z");
     const s2 = seedQueued("b", "вторая карточка о миграциях базы", ["db", "migrations"], "2026-09-13T12:00:00Z");
     // Склеиваем в одно хранилище (как CLI: один state-файл)
@@ -78,14 +78,14 @@ describe("buildQueueCard (ТЗ §12.1)", () => {
       contradictions: [],
       profiles: {},
     });
-    const cardA = buildQueueCard(merged.getItem("a") as Item, merged, CONFIG, NOW);
+    const cardA = await buildQueueCard(merged.getItem("a") as Item, merged, CONFIG, NOW);
     expect(cardA.costOfInaction).toBe(2); // a + b (общий тег db)
 
     const alone = seedQueued("solo", "одинокая карточка про уникальный тег", ["unique-tag"], "2026-09-13T12:00:00Z");
-    expect(buildQueueCard(alone.getItem("solo") as Item, alone, CONFIG, NOW).costOfInaction).toBe(1);
+    expect((await buildQueueCard(alone.getItem("solo") as Item, alone, CONFIG, NOW)).costOfInaction).toBe(1);
   });
 
-  it("провенанс и gate_results доступны карточке", () => {
+  it("провенанс и gate_results доступны карточке", async () => {
     const s = seedQueued("p", "карточка с провенансом задачи", ["x"], "2026-09-13T12:00:00Z");
     s.addGateResult({
       id: "g1",
@@ -95,14 +95,14 @@ describe("buildQueueCard (ТЗ §12.1)", () => {
       detail: { risk_tier: "high" },
       createdAt: "2026-09-13T12:00:00Z",
     });
-    const card = buildQueueCard(s.getItem("p") as Item, s, CONFIG, NOW);
+    const card = await buildQueueCard(s.getItem("p") as Item, s, CONFIG, NOW);
     expect(card.provenanceRefs[0]?.taskId).toBe("task-p");
     expect(card.gateResults).toHaveLength(1);
   });
 });
 
 describe("listQueueCards", () => {
-  it("сортировка: цена бездействия (убыв), затем старейшие", () => {
+  it("сортировка: цена бездействия (убыв), затем старейшие", async () => {
     const s = seedQueued("new", "новая карточка общего тега", ["common"], "2026-09-14T00:00:00Z");
     const s2 = seedQueued("old2", "старая карточка общего тега", ["common"], "2026-09-01T00:00:00Z");
     const merged = MemoryStore.fromSnapshot({
@@ -116,7 +116,7 @@ describe("listQueueCards", () => {
       contradictions: [],
       profiles: {},
     });
-    const cards = listQueueCards(merged, CONFIG, NOW);
+    const cards = await listQueueCards(merged, CONFIG, NOW);
     expect(cards.map((c) => c.item.id)).toEqual(["old2", "new"]); // равный cost → старая первая
     expect(cards.every((c) => c.item.status === "queued")).toBe(true);
   });

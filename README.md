@@ -112,6 +112,30 @@ curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"ds
 Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
 `test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
 
+## Режим Postgres в CLI (M2.4)
+
+Все команды работают и в memory-режиме (JSON-снимок, по умолчанию), и в
+Postgres-режиме: добавьте `--db <url>` (или переменная `EVOLVE_DB_URL`):
+
+```bash
+node dist/cli.js item add "…" --db "$EVOLVE_DB_URL" --type fact --scope "src/db/**" --body "…" \
+  --task-id t1 --transcript-hash sha256:x --commit deadbeef --verifier tests
+node dist/cli.js item list --db "$EVOLVE_DB_URL"
+node dist/cli.js task use t1 --db "$EVOLVE_DB_URL" --agent dsh --item <id>
+node dist/cli.js task verify t1 --db "$EVOLVE_DB_URL" --agent dsh --success --verifier tests
+node dist/cli.js extract run --db "$EVOLVE_DB_URL" --task-id t1 --transcript "…" --verifier tests
+node dist/cli.js queue list --db "$EVOLVE_DB_URL"
+node dist/cli.js scores recompute --db "$EVOLVE_DB_URL"
+node dist/cli.js canary evaluate --db "$EVOLVE_DB_URL"
+```
+
+Единый путь кода: хранилище — `AsyncStore` (PgStore) либо
+`asyncStoreOf(MemoryStore)`; гейты/очередь работают с обоими.
+
+End-to-end (демо 14.09): `item add` → canary → `task use/verify` ×5 →
+`scores recompute` → `canary evaluate` → **active** (auto:canary, decision в
+аудите). Критерий M2: canary-цикл без ручного вмешательства — `canary evaluate`.
+
 ## Postgres (M2)
 
 Схема — `db/schema.sql` (контракт, TЗ §7.1), миграции — `db/migrations/`

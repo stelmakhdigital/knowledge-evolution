@@ -11,7 +11,7 @@ import {
   type RiskTier,
 } from "../domain/types.js";
 import { cosineSimilarity, type LlmClient } from "../llm/client.js";
-import type { Store } from "../store/store.js";
+import type { AsyncStore } from "../store/async-store.js";
 
 /**
  * Гейты G1–G5 (ТЗ §9): синхронные, дешёвые, конфигурируемые.
@@ -25,7 +25,7 @@ import type { Store } from "../store/store.js";
 export interface GateContext {
   readonly candidate: Candidate;
   readonly /** Идентификатор кандидата для gate_results (генерирует экстрактор/CLI). */ candidateRef: string;
-  readonly store: Store;
+  readonly store: AsyncStore;
   readonly config: EvolveConfig;
   readonly llm: LlmClient;
   readonly clock: Clock;
@@ -88,9 +88,9 @@ export function gateEvidence(ctx: GateContext): GateResult {
 
 // --- G2 dedup: cos_sim с базой ≥ θ_dedup → merge-предложение ---
 
-export function gateDedup(ctx: GateContext): GateResult {
+export async function gateDedup(ctx: GateContext): Promise<GateResult> {
   const query = ctx.llm.embed(ctx.candidate.body);
-  const existing = ctx.store.listItems().filter((i) => i.status !== "archived");
+  const existing = (await ctx.store.listItems()).filter((i) => i.status !== "archived");
   let best: { id: string; similarity: number } | null = null;
   for (const item of existing) {
     const similarity = cosineSimilarity(query, ctx.llm.embed(item.body));
@@ -130,9 +130,9 @@ export function gateScope(ctx: GateContext): GateResult {
 
 // --- G5 budget: лимиты (ТЗ G5, A5) ---
 
-export function gateBudget(ctx: GateContext): GateResult {
+export async function gateBudget(ctx: GateContext): Promise<GateResult> {
   const { budget } = ctx.config;
-  const items = ctx.store.listItems();
+  const items = await ctx.store.listItems();
   const activeCount = items.filter((i) => i.status === "active").length;
   // Приближение M0 (задокументировано): «queue/нед» = текущий объём очереди.
   const queuedCount = items.filter((i) => i.status === "queued").length;
@@ -140,11 +140,9 @@ export function gateBudget(ctx: GateContext): GateResult {
   // В конвейере G1 текущего кандидата уже записан до G5, т.е. он учтён в счёте:
   // лимит N означает, что проходят N кандидатов, (N+1)-й отклоняется.
   const todayStart = ctx.clock().toISOString().slice(0, 10) + "T00:00:00.000Z";
-  const candidatesToday = ctx.store.listGateResults({
-    gate: "evidence",
-    since: todayStart,
-    agentId: ctx.agentId,
-  }).length;
+  const candidatesToday = (
+    await ctx.store.listGateResults({ gate: "evidence", since: todayStart, agentId: ctx.agentId })
+  ).length;
 
   if (activeCount >= budget.active_max) {
     return gateResult(ctx, "budget", "fail", {
@@ -181,12 +179,12 @@ export function gateBudget(ctx: GateContext): GateResult {
 // --- G3 conflict: LLM-детектор противоречий с active (после создания item) ---
 
 export async function gateConflict(item: Item, ctx: Omit<GateContext, "candidate"> & { candidateRef: string }): Promise<GateResult> {
-  const activeItems = ctx.store.listItems({ status: "active" });
+  const activeItems = await ctx.store.listItems({ status: "active" });
   for (const other of activeItems) {
     const verdict = await ctx.llm.detectConflict(item.body, other.body);
     if (verdict.conflicting) {
       const contradictionId = randomUUID();
-      ctx.store.addContradiction({
+      await ctx.store.addContradiction({
         id: contradictionId,
         itemAId: item.id,
         itemBId: other.id,
@@ -214,19 +212,19 @@ export async function admitCandidate(ctx: GateContext): Promise<AdmissionResult>
   const results: GateResult[] = [];
   const riskTier = riskTierOf(ctx.candidate);
 
-  const record = (r: GateResult): void => {
+  const record = async (r: GateResult): Promise<void> => {
     results.push(r);
-    ctx.store.addGateResult(r);
+    await ctx.store.addGateResult(r);
   };
 
   const g1 = gateEvidence(ctx);
-  record(g1);
+  await record(g1);
   if (g1.outcome === "fail") {
     return { gates: { results, riskTier, decision: "reject", reason: g1.detail["reason"] as string } };
   }
 
-  const g2 = gateDedup(ctx);
-  record(g2);
+  const g2 = await gateDedup(ctx);
+  await record(g2);
   if (g2.outcome === "fail") {
     return {
       gates: {
@@ -240,10 +238,10 @@ export async function admitCandidate(ctx: GateContext): Promise<AdmissionResult>
   }
 
   const g4 = gateScope(ctx);
-  record(g4);
+  await record(g4);
 
-  const g5 = gateBudget(ctx);
-  record(g5);
+  const g5 = await gateBudget(ctx);
+  await record(g5);
   if (g5.outcome === "fail") {
     return { gates: { results, riskTier, decision: "reject", reason: g5.detail["reason"] as string } };
   }
@@ -268,7 +266,7 @@ export async function admitCandidate(ctx: GateContext): Promise<AdmissionResult>
     createdAt: now,
     updatedAt: now,
   };
-  ctx.store.addItem({
+  await ctx.store.addItem({
     item,
     provenance: [c.provenance],
     initialDecision: {
@@ -284,10 +282,10 @@ export async function admitCandidate(ctx: GateContext): Promise<AdmissionResult>
   // G3 — с id item (см. примечание в шапке модуля).
   const g3 = await gateConflict(item, ctx);
   results.push(g3);
-  ctx.store.addGateResult(g3);
+  await ctx.store.addGateResult(g3);
   const finalTier: RiskTier = g3.outcome === "fail" ? "high" : riskTier; // противоречие → в очередь к человеку
 
-  const updated = ctx.store.applyTransition(item.id, {
+  const updated = await ctx.store.applyTransition(item.id, {
     to: finalTier === "low" ? "canary" : "queued",
     kind: "promote",
     actor: "auto:gate",

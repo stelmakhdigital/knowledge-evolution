@@ -120,18 +120,18 @@ describe("G1 evidence (ТЗ: task_id + верификация, не self-reporte
 });
 
 describe("G2 dedup (cos_sim ≥ θ_dedup → merge-предложение)", () => {
-  it("pass: тело уникально относительно базы", () => {
+  it("pass: тело уникально относительно базы", async () => {
     const store = new MemoryStore(clock);
     seedItem(store, "i1", "совсем другое утверждение про кеш и пул соединений");
-    const r = gateDedup(makeCtx(makeCandidate(), { store }));
+    const r = await gateDedup(makeCtx(makeCandidate(), { store }));
     expect(r.outcome).toBe("pass");
     expect(Number(r.detail["max_similarity"] ?? 0)).toBeLessThan(CONFIG.theta_dedup);
   });
 
-  it("fail: тело идентично существующему item → merge", () => {
+  it("fail: тело идентично существующему item → merge", async () => {
     const store = new MemoryStore(clock);
     seedItem(store, "i1", "миграции лежат в db/migrations, формат foo");
-    const r = gateDedup(makeCtx(makeCandidate(), { store }));
+    const r = await gateDedup(makeCtx(makeCandidate(), { store }));
     expect(r.outcome).toBe("fail");
     expect(r.detail["merge_item_id"]).toBe("i1");
     expect(Number(r.detail["similarity"] ?? 0)).toBeGreaterThanOrEqual(CONFIG.theta_dedup);
@@ -154,24 +154,24 @@ describe("G4 scope (широта → risk_tier, ТЗ §8)", () => {
 });
 
 describe("G5 budget (ТЗ: active ≤ 300; queue/нед ≤ 10; кандидатов/агент/день ≤ 5)", () => {
-  it("fail: active достиг cap", () => {
+  it("fail: active достиг cap", async () => {
     const store = new MemoryStore(clock);
     seedItem(store, "a1", "первый активный элемент про базу данных", "active");
     seedItem(store, "a2", "второй активный элемент про тестирование кода", "active");
-    const r = gateBudget(makeCtx(makeCandidate(), { store, config: withBudget({ active_max: 2 }) }));
+    const r = await gateBudget(makeCtx(makeCandidate(), { store, config: withBudget({ active_max: 2 }) }));
     expect(r.outcome).toBe("fail");
     expect(String(r.detail["reason"])).toMatch(/active=2 ≥ cap=2/);
   });
 
-  it("fail: очередь переполнена", () => {
+  it("fail: очередь переполнена", async () => {
     const store = new MemoryStore(clock);
     seedItem(store, "q1", "ожидающий в очереди элемент про миграции", "queued");
-    const r = gateBudget(makeCtx(makeCandidate(), { store, config: withBudget({ queue_per_week_max: 1 }) }));
+    const r = await gateBudget(makeCtx(makeCandidate(), { store, config: withBudget({ queue_per_week_max: 1 }) }));
     expect(r.outcome).toBe("fail");
     expect(String(r.detail["reason"])).toMatch(/queued=1/);
   });
 
-  it("fail: дневной лимит кандидатов на агента (с учётом текущего кандидата)", () => {
+  it("fail: дневной лимит кандидатов на агента (с учётом текущего кандидата)", async () => {
     const store = new MemoryStore(clock);
     // Симуляция: G1 уже записан для текущего кандидата + 1 прошлый кандидат того же агента за сегодня.
     const preSeed: GateResult = {
@@ -186,12 +186,12 @@ describe("G5 budget (ТЗ: active ≤ 300; queue/нед ≤ 10; кандидат
     const ctx = makeCtx(makeCandidate(), { store, config: withBudget({ candidates_per_agent_per_day_max: 1 }) });
     // В конвейере G1 текущего кандидата записывается до G5:
     ctx.store.addGateResult({ ...preSeed, id: "g-2", candidateId: "cand-1", detail: { agent_id: "dsh", verifier: "tests" } });
-    const r = gateBudget(ctx);
+    const r = await gateBudget(ctx);
     expect(r.outcome).toBe("fail");
     expect(String(r.detail["reason"])).toMatch(/кандидатов агента dsh сегодня: 2 > 1|≥ 1|2 ≥ 1/);
   });
 
-  it("pass: лимиты не превышены (5-й кандидат из лимита 5 проходит)", () => {
+  it("pass: лимиты не превышены (5-й кандидат из лимита 5 проходит)", async () => {
     const store = new MemoryStore(clock);
     for (let i = 0; i < 5; i += 1) {
       store.addGateResult({
@@ -203,7 +203,7 @@ describe("G5 budget (ТЗ: active ≤ 300; queue/нед ≤ 10; кандидат
         createdAt: `2026-09-14T0${i}:00:00.000Z`,
       });
     }
-    const r = gateBudget(makeCtx(makeCandidate(), { store })); // 5 ≤ 5 → проходит (6-й уже не пройдёт)
+    const r = await gateBudget(makeCtx(makeCandidate(), { store })); // 5 ≤ 5 → проходит (6-й уже не пройдёт)
     expect(r.outcome).toBe("pass");
     expect(r.detail["candidates_today"]).toBe(5);
   });
