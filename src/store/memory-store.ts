@@ -7,6 +7,7 @@ import type {
   Clock,
   Contradiction,
   Decision,
+  GateName,
   GateResult,
   Item,
   ItemType,
@@ -158,6 +159,24 @@ export class MemoryStore implements Store {
 
   gateResultsFor(candidateId: string): readonly GateResult[] {
     return (this.gateResults.get(candidateId) ?? []).map((g) => ({ ...g, detail: { ...g.detail } }));
+  }
+
+  listGateResults(filter?: { gate?: GateName; since?: string; agentId?: string }): readonly GateResult[] {
+    return [...this.gateResults.values()]
+      .flat()
+      .filter((g) => {
+        if (filter?.gate && g.gate !== filter.gate) {
+          return false;
+        }
+        if (filter?.since && g.createdAt < filter.since) {
+          return false;
+        }
+        if (filter?.agentId && g.detail["agent_id"] !== filter.agentId) {
+          return false;
+        }
+        return true;
+      })
+      .map((g) => ({ ...g, detail: { ...g.detail } }));
   }
 
   // --- решения ---

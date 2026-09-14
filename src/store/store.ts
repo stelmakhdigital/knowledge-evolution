@@ -3,6 +3,7 @@ import type {
   Contradiction,
   Decision,
   DecisionKind,
+  GateName,
   GateResult,
   Item,
   ItemStatus,
@@ -59,6 +60,8 @@ export interface Store {
   // --- гейты ---
   addGateResult(gateResult: GateResult): void;
   gateResultsFor(candidateId: string): readonly GateResult[];
+  /** Поисковый доступ (G5-лимиты): по гейту, дате и agent_id из detail. */
+  listGateResults(filter?: { gate?: GateName; since?: string; agentId?: string }): readonly GateResult[];
 
   // --- решения (аудит) ---
   decisionsFor(itemId: string): readonly Decision[];
