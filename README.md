@@ -49,11 +49,29 @@ node dist/cli.js item list --status queued
 node dist/cli.js item show <id>        # white-box: body + провенанс + decisions (ТЗ §7.2.6)
 node dist/cli.js item allowed <id>     # допустимые следующие статусы
 
-# Человеческое решение из очереди
+# Человеческое решение из очереди (недельное окно, ТЗ §12.1)
+node dist/cli.js queue list                 # карточки: age, цена бездействия, STALE>14д
+node dist/cli.js queue show <id>             # body, провенанс, гейты, противоречия
+node dist/cli.js queue accept <id> --reason "принято в недельном окне"
+node dist/cli.js queue accept-edit <id> --body "исправленное тело" --reason "сужили scope"
+node dist/cli.js queue reject <id> --reason "причина (обязательная, идёт в decisions)"
 node dist/cli.js item transition <id> canary --reason "принято в недельном окне"
 ```
 
-Коды выхода `item add`: 0 — accept/merge, 1 — reject (гейт не пройден) или ошибка.
+### Телеметрия и экстрактор (M1)
+
+```bash
+node dist/cli.js task start <taskId> --agent dsh
+node dist/cli.js task use <taskId> --agent dsh --item <itemId>   # запись ДО начала задачи
+node dist/cli.js task verify <taskId> --agent dsh --success --verifier tests --verifier-id vitest
+node dist/cli.js task show <taskId>
+
+# Экстрактор: транскрипт завершённой задачи → кандидаты → гейты
+node dist/cli.js extract run --task-id task-99 --transcript-file /tmp/transcript.txt \
+  --verifier tests --commit abc123 --agent dsh
+```
+
+Коды выхода `item add` / `extract run`: 0 — accept/merge, 1 — reject (гейт не пройден) или ошибка.
 `--verifier` обязателен для прохождения G1 (self-reported успех запрещён, ТЗ §9).
 
 ## Разработка

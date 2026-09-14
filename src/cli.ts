@@ -31,6 +31,7 @@ import {
 } from "./domain/telemetry.js";
 import { admitCandidate } from "./gates/gates.js";
 import { MockExtractor, toDomainCandidate } from "./extractor/extractor.js";
+import { buildQueueCard, listQueueCards } from "./queue/queue.js";
 import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -593,9 +594,156 @@ extract
     }
   });
 
+// --- очередь high-risk (ТЗ §12.1: недельное окно) ---
+
+const queue = new Command("queue").description("очередь high-risk: карточки, принять/отклонить (ТЗ §12.1)");
+
+queue
+  .command("list")
+  .description("карточки очереди (age, цена бездействия, stale)")
+  .action((_opts: unknown, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+      const { store } = openStore(globalOpts);
+      const cards = listQueueCards(store, config, new Date());
+      if (cards.length === 0) {
+        console.log("(очередь пуста)");
+        return;
+      }
+      for (const c of cards) {
+        const flags: string[] = [];
+        if (c.stale) {
+          flags.push(`STALE>${config.alerts.queue_card_max_days}д`);
+        }
+        if (c.openContradictions.length > 0) {
+          flags.push(`contradictions=${c.openContradictions.length}`);
+        }
+        const prov = c.provenanceRefs[0];
+        console.log(
+          `${shortId(c.item.id)}  ${c.item.type.padEnd(14)} ${c.item.riskTier.padEnd(4)} age=${c.daysInQueue}д cost=${c.costOfInaction} ${c.item.scope}  ${c.item.title}  [task=${prov?.taskId ?? "-"} commit=${prov?.commit ?? "-"}]${flags.length > 0 ? ` (${flags.join(", ")})` : ""}`,
+        );
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+queue
+  .command("show <id>")
+  .description("полная карточка: body, провенанс, гейты, противоречия (ТЗ §12.1)")
+  .action((id: string, _opts: unknown, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+      const { store } = openStore(globalOpts);
+      const itemRow = store.getItem(id);
+      if (!itemRow || itemRow.status !== "queued") {
+        throw new EvolveError("NOT_IN_QUEUE", `item ${id} не в очереди (статус: ${itemRow?.status ?? "нет"})`);
+      }
+      const card = buildQueueCard(itemRow, store, config, new Date());
+      console.log(`карточка ${itemRow.id} — ${itemRow.title}`);
+      console.log(`  type=${itemRow.type} risk=${itemRow.riskTier} scope=${itemRow.scope} age=${card.daysInQueue}д costOfInaction=${card.costOfInaction}${card.stale ? ` [STALE > ${config.alerts.queue_card_max_days}д]` : ""}`);
+      console.log(`  body:`);
+      console.log(indent(itemRow.body));
+      console.log(`  provenance:`);
+      for (const p of card.provenanceRefs) {
+        console.log(`    - source=${p.sourceType} task=${p.taskId} commit=${p.commit} verifier=${String(p.payload["verifier"] ?? "-")}`);
+      }
+      if (card.gateResults.length > 0) {
+        console.log(`  gates: ${card.gateResults.map((g) => `${g.gate}=${g.outcome}`).join(", ")}`);
+      }
+      if (card.openContradictions.length > 0) {
+        console.log(`  противоречия:`);
+        for (const c of card.openContradictions) {
+          const otherId = c.itemAId === itemRow.id ? c.itemBId : c.itemAId;
+          console.log(`    - vs ${shortId(otherId)} (severity=${c.severity}, ${c.id})`);
+        }
+      }
+      console.log(`  решения: ${store.decisionsFor(itemRow.id).map((d) => `${d.kind}(${d.actor})`).join(", ")}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+queue
+  .command("accept <id>")
+  .description("принять: queued → canary (actor=human)")
+  .option("--reason <text>", "причина (в decisions)", "принято в недельном окне")
+  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const updated = store.applyTransition(id, {
+        to: "canary",
+        kind: "promote",
+        actor: "human",
+        reason: req(opts, "reason"),
+        evidence: { source: "queue" },
+      });
+      saveStore(store, statePath);
+      console.log(`${shortId(id)}: queued → ${updated.status} (actor=human)`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+queue
+  .command("accept-edit <id>")
+  .description("принять с правкой: новая версия (approve_edit) + queued → canary")
+  .requiredOption("--body <text>", "новое тело знания")
+  .option("--reason <text>", "почему правка (в decisions)", "принято с правкой в недельном окне")
+  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const updated = store.addVersion(id, req(opts, "body"), {
+        kind: "approve_edit",
+        actor: "human",
+        reason: req(opts, "reason"),
+        evidence: { source: "queue" },
+      });
+      const after = store.applyTransition(id, {
+        to: "canary",
+        kind: "promote",
+        actor: "human",
+        reason: "принято с правкой → canary (ТЗ §12.1)",
+        evidence: { version: updated.version },
+      });
+      saveStore(store, statePath);
+      console.log(`${shortId(id)}: v${after.version}, queued → ${after.status} (actor=human)`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+queue
+  .command("reject <id>")
+  .description("отклонить: queued → archived, причина обязательная (ТЗ §12.1)")
+  .requiredOption("--reason <text>", "причина отклонения (строится в decisions; экстрактор учитывает частые причины)")
+  .action((id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const updated = store.applyTransition(id, {
+        to: "archived",
+        kind: "reject",
+        actor: "human",
+        reason: req(opts, "reason"),
+        archivedReason: req(opts, "reason"),
+        evidence: { source: "queue" },
+      });
+      saveStore(store, statePath);
+      console.log(`${shortId(id)}: queued → ${updated.status} (actor=human, reason: ${req(opts, "reason")})`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 program.addCommand(item);
 program.addCommand(task);
 program.addCommand(extract);
+program.addCommand(queue);
 
 process.on("unhandledRejection", (reason) => {
   console.error("[evolve] unhandledRejection:", reason instanceof Error ? reason.stack ?? reason.message : String(reason));
