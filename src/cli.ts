@@ -45,6 +45,7 @@ import { runDecay } from "./decay/decay.js";
 import { buildWeeklyReport, renderMarkdown } from "./report/report.js";
 import { recordReview, type ReviewIssue } from "./review/review.js";
 import { latestCriticWeight, recomputeCriticWeight } from "./critic/critic.js";
+import { auditAgentAgnostic } from "./audit/agent-agnostic.js";
 import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -1186,6 +1187,46 @@ criticCmd
     }
   });
 
+const auditCmd = new Command("audit").description("аудит hard-requirements (ТЗ §14: agent-agnostic)");
+
+auditCmd
+  .command("agent-agnostic")
+  .description("проверка ТЗ §14: без хардкода агентов, applies_to, score-на-паре, профили")
+  .option("--db <url>", "connection string (добавляет проверки живой БД)")
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      loadConfig(resolveConfigPath());
+      const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+      // --db декларирован и на программе (глобально): читаем из optsWithGlobals.
+      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"];
+      let pool: Pool | undefined;
+      if (dbUrl) {
+        pool = new Pool({ connectionString: dbUrl });
+      }
+      try {
+        const checks = await auditAgentAgnostic(root, pool);
+        let failed = 0;
+        for (const c of checks) {
+          console.log(`${c.ok ? "✓" : "✗"} ${c.id}: ${c.detail}`);
+          if (!c.ok) {
+            failed += 1;
+          }
+        }
+        console.log(failed === 0 ? "agent-agnostic: все проверки пройдены (ТЗ §14)" : `agent-agnostic: ${failed} проверок не пройдено`);
+        if (failed > 0) {
+          process.exit(1);
+        }
+      } finally {
+        if (pool) {
+          await pool.end();
+        }
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(auditCmd);
 program.addCommand(criticCmd);
 program.addCommand(reportCmd);
 program.addCommand(decayCmd);

@@ -148,6 +148,22 @@ node dist/cli.js review record --db "$EVOLVE_DB_URL" \
 heuristic с scope=all → risk=high → queue (ручное ревью команды);
 повторный lesson → merge (G2), issue без lesson — только телеметрия.
 
+## Agent-agnostic audit (M5)
+
+Автоматическая проверка hard-requirements ТЗ §14 (агент = `agent_id` + профиль,
+никакого хардкода агентов в схемах/конвейере/метриках):
+
+1. `no-hardcoded-agents` — конвейерный код (16 папок src/) без литералов агентов;
+2. `applies-to-default` — DDL `applies_to DEFAULT 'all'`;
+3. `retrieval-filters-applies-to` — фильтр `'all' | agent_id` в retrieval;
+4. `score-per-pair` — `item_scores` PK (item_id, agent_id) (статика + живая БД);
+5. `agent-profiles` — таблица профилей + сервис использует профиль;
+6. `applies-to-values` (с БД) — нет пустых/NULL applies_to.
+
+```bash
+node dist/cli.js audit agent-agnostic [--db "$EVOLVE_DB_URL"]   # exit 1 при сбое
+```
+
 ## Недельный отчёт и алерты (M3)
 
 `report weekly` — сводка за 7 дней (ТЗ §15 M3: «недельное окно ≤ 20 минут»):
