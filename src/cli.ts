@@ -30,6 +30,7 @@ import {
   TelemetryError,
 } from "./domain/telemetry.js";
 import { admitCandidate } from "./gates/gates.js";
+import { MockExtractor, toDomainCandidate } from "./extractor/extractor.js";
 import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -499,8 +500,102 @@ task
     }
   });
 
+const extract = new Command("extract").description(
+  "экстрактор: транскрипт завершённой задачи → кандидаты → гейты (M1, ТЗ §8/§15)",
+);
+
+extract
+  .command("run")
+  .description("выполнить экстракцию и прогнать кандидатов через G1–G5")
+  .requiredOption("--task-id <id>", "id завершённой задачи")
+  .option("--transcript-file <path>", "файл с транскриптом")
+  .option("--transcript <text>", "транскрипт строкой")
+  .requiredOption("--verifier <v>", "верификатор успеха: tests|lint|smoke|human (G1)")
+  .option("--verifier-id <id>", "конкретный верификатор", "")
+  .option("--commit <sha>", "git-коммит задачи (провенанс)", "unknown")
+  .option("--agent <agentId>", "ид агента", "dsh")
+  .option("--scope-hints <hints>", "scope-подсказки через запятую", "")
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const transcriptFile = opts["transcriptFile"];
+      const transcriptArg = opts["transcript"];
+      if (Boolean(transcriptFile) === Boolean(transcriptArg)) {
+        throw new EvolveError("EXTRACT_TRANSCRIPT", "укажите ровно один из --transcript-file/--transcript");
+      }
+      const transcript = transcriptFile ? readFileSync(transcriptFile, "utf8") : (transcriptArg as string);
+      if (transcript.trim().length === 0) {
+        throw new EvolveError("EXTRACT_EMPTY", "транскрипт пуст");
+      }
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+      const { store, statePath } = openStore(globalOpts);
+      const taskId = req(opts, "taskId");
+      const agentId = req(opts, "agent");
+      const transcriptHash = `sha256:${hashBody(transcript)}`;
+
+      const extraction = await new MockExtractor().extract({
+        taskId,
+        agentId,
+        transcript,
+        verifier: req(opts, "verifier"),
+        verifierId: (opts["verifierId"] as string | undefined) ?? req(opts, "verifier"),
+        scopeHints: (opts["scopeHints"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+      });
+      if (extraction.candidates.length === 0) {
+        console.log(`кандидатов не извлечено. notes: ${extraction.notes || "—"}`);
+        saveStore(store, statePath);
+        return;
+      }
+      console.log(`извлечено кандидатов: ${extraction.candidates.length}`);
+      let accepted = 0;
+      let rejected = 0;
+      let merged = 0;
+      for (const [i, ext] of extraction.candidates.entries()) {
+        const candidate = toDomainCandidate(ext, {
+          sourceType: "success",
+          taskId,
+          transcriptHash,
+          commit: req(opts, "commit"),
+          payload: { verifier: req(opts, "verifier"), verifier_id: (opts["verifierId"] as string | undefined) ?? req(opts, "verifier") },
+          createdAt: new Date().toISOString(),
+        });
+        const candidateRef = `ext-${hashBody(transcript).slice(0, 8)}-${i}-${taskId}`;
+        const res = await admitCandidate({
+          candidate,
+          candidateRef,
+          store,
+          config,
+          llm: new MockLlm(),
+          clock: () => new Date(),
+          agentId,
+        });
+        if (res.gates.decision === "accept") {
+          accepted += 1;
+          console.log(`  [${i}] accept (risk=${res.gates.riskTier}) → ${shortId((res.item as Item).id)} ${res.item?.status} — ${candidate.title}`);
+        } else if (res.gates.decision === "merge") {
+          merged += 1;
+          console.log(`  [${i}] merge → ${shortId(res.gates.mergeItemId ?? "")} — ${candidate.title}`);
+        } else {
+          rejected += 1;
+          console.log(`  [${i}] reject — ${res.gates.reason} — ${candidate.title}`);
+        }
+      }
+      if (extraction.notes.length > 0) {
+        console.log(`notes: ${extraction.notes}`);
+      }
+      saveStore(store, statePath);
+      console.log(`итого: accept=${accepted}, merge=${merged}, reject=${rejected}`);
+      if (accepted === 0 && merged === 0) {
+        process.exit(1);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 program.addCommand(item);
 program.addCommand(task);
+program.addCommand(extract);
 
 process.on("unhandledRejection", (reason) => {
   console.error("[evolve] unhandledRejection:", reason instanceof Error ? reason.stack ?? reason.message : String(reason));
