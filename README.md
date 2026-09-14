@@ -112,6 +112,26 @@ curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"ds
 Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
 `test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
 
+## Review-триггер и критик (M4)
+
+Структурированный фидбэк человека или критик-агента (ТЗ §13): оценка 1..5 +
+issues (type/severity/evidence/lesson_candidate) → событие `review_recorded` +
+каждый lesson — обычный кандидат через конвейер (критик — «ещё один источник,
+не привилегированный»). G1 для review/critic: верификация = task_id +
+transcript_hash просмотренной задачи + rating. `critic_weight` (config.critic)
+сохраняется в провенанс — основа авто-веса критика и отчёта (ТЗ §15 M4).
+
+```bash
+node dist/cli.js review record --db "$EVOLVE_DB_URL" \
+  --task-id t1 --source critic --rating 2 \
+  --transcript-hash sha256:… --commit cafe \
+  --lesson "проверять код ответа БД перед кэшированием" \
+  --issue-type bug --issue-severity high --evidence "src/api/handler.ts:42"
+```
+
+heuristic с scope=all → risk=high → queue (ручное ревью команды);
+повторный lesson → merge (G2), issue без lesson — только телеметрия.
+
 ## Недельный отчёт и алерты (M3)
 
 `report weekly` — сводка за 7 дней (ТЗ §15 M3: «недельное окно ≤ 20 минут»):

@@ -72,8 +72,24 @@ function gateResult(
 
 export function gateEvidence(ctx: GateContext): GateResult {
   const p = ctx.candidate.provenance;
-  const verifier = typeof p.payload["verifier"] === "string" ? (p.payload["verifier"] as string) : "";
   const detail: Record<string, unknown> = { agent_id: ctx.agentId };
+  // G1 для review/critic (ТЗ §13, M4): «верификация» — сам структурированный фидбэк:
+  // task_id + transcript_hash просмотренной задачи + rating 1..5 (человек/критик — верификатор).
+  if (p.sourceType === "review" || p.sourceType === "critic") {
+    const rating = p.payload["rating"];
+    const hasRating = typeof rating === "number" && rating >= 1 && rating <= 5;
+    if (p.taskId.length === 0 || p.transcriptHash.length === 0 || !hasRating) {
+      return gateResult(ctx, "evidence", "fail", {
+        ...detail,
+        reason: "review/critic провенанс без task_id + transcript_hash + rating (ТЗ G1/§13)",
+        has_task_id: p.taskId.length > 0,
+        has_transcript_hash: p.transcriptHash.length > 0,
+        rating: hasRating ? rating : null,
+      });
+    }
+    return gateResult(ctx, "evidence", "pass", { ...detail, source: p.sourceType, rating });
+  }
+  const verifier = typeof p.payload["verifier"] === "string" ? (p.payload["verifier"] as string) : "";
   if (p.taskId.length === 0 || p.transcriptHash.length === 0 || verifier.length === 0) {
     return gateResult(ctx, "evidence", "fail", {
       ...detail,

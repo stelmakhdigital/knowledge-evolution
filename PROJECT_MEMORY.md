@@ -32,19 +32,21 @@
 
 ## 6. Текущее состояние (2026-09-14, свежесть ≤ 1 недели)
 
-- **Фаза: M3** — отчётность, decay, drift.
-- Закрыто: M0 (каркас), M1 (телеметрия/экстрактор/очередь), M2 (Postgres+pgvector,
-  retrieval hybrid + /retrieve, score per (item,agent), canary-цикл, CLI на PG — 137/137).
-- Коммиты M2: 1277345 (M2.1), 3450651 (M2.2, recall@5=0.95), 22d6ed8 (M2.3), 00337be (M2.4, e2e).
-- Окружение: PG 16.9 + pgvector 0.7.4 в ~/.pgsql (порт 5432, БД: evolve, *_test);
-  CLI: все команды — memory (JSON) или PG (--db / EVOLVE_DB_URL), единый AsyncStore.
-- Следующие шаги (M3):
-  1. M3.1: decay (21д без usage → deprecated; 30д → archived; contradiction>7д → queue;
-     защита от over-pruning max_deprecated_share=0.2) + CLI decay run + rollback 1-клик;
-  2. M3.2: недельный отчёт + алерты (alerts-конфиг: budget, contradictions,
-     success_rate_drop, churn, queue-card, cost_growth) — CLI report weekly;
-  3. M4: критик + review-триггер; M5/M6: agent-agnostic/transfer, meta-оптимизация.
-- Режим: коммит/пуш без запроса (разрешено пользователем 14.09); отчёты — по-русски.
+- **Фаза: M4** — критик и review-триггер.
+- Закрыто: M0, M1, M2 (137/137→), M3 (decay+rollback 087beea, отчёт+алерты
+  b0993ac, drift — 149/149).
+- M4.1 (16.09-17.09): review-триггер — recordReview (event review_recorded +
+  lesson-кандидаты через конвейер), G1 review/critic (rating 1..5), CLI
+  `review record`, critic_weight в провенансе — 157/157.
+- Следующие шаги (M4):
+  1. M4.2: авто-вес критика (еженедельный пересчёт critic_weight по
+     телеметрии: success на задачах с lesson-кандидатами критика vs база;
+     false-positive issues снижают вес) + «вес-механика видна в отчёте»
+     (секция critic в report weekly); критерий M4: ≥ 50% lesson-кандидатов
+     критика проходят гейты;
+  2. tool_proposal-поток (type tool_proposal → high → queue, уже работает
+     как тип); M5: agent-agnostic/transfer; M6: meta-оптимизация.
+- Режим: коммит/пуш без запроса; отчёты — по-русски.
 
 ## 7. Глоссарий
 Термины ТЗ §6 (item, candidate, провенанс, risk-тир, canary, score, чирн, harness) — каноничное определение в `knowledge-evolution-tz.md` §6, здесь не дублируются.

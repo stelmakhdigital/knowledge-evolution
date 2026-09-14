@@ -43,6 +43,8 @@ import { recomputeScores, itemScoreFor } from "./telemetry/score.js";
 import { evaluateCanaries } from "./canary/canary.js";
 import { runDecay } from "./decay/decay.js";
 import { buildWeeklyReport, renderMarkdown } from "./report/report.js";
+import { recordReview, type ReviewIssue } from "./review/review.js";
+import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
 
@@ -1080,6 +1082,82 @@ reportCmd
     }
   });
 
+const reviewCmd = new Command("review").description("review-триггер: фидбэк человека/критика → конвейер (ТЗ §13, M4)");
+
+const reviewRecord = new Command("record")
+  .description("записать review (rating 1..5 + issues) и прогнать lesson-кандидаты через гейты")
+  .requiredOption("--task-id <id>", "задача, по которой ревью")
+  .requiredOption("--source <human|critic>", "источник фидбэка")
+  .requiredOption("--rating <n>", "оценка 1..5")
+  .requiredOption("--transcript-hash <hash>", "hash транскрипта просмотренной задачи")
+  .option("--commit <sha>", "коммит задачи", "none")
+  .option("--lesson <text>", "lesson_candidate (issue → кандидат)")
+  .option("--issue-type <bug|design|missing|style|other>", "тип issue", "other")
+  .option("--issue-severity <low|med|high>", "серьёзность issue", "med")
+  .option("--evidence <text>", "доказательство issue (file:line / тест / цитата)", "")
+  .option("--type <skill|heuristic|negative|fact|tool_proposal>", "тип кандидата", "heuristic")
+  .option("--scope <glob>", "scope кандидата", "all")
+  .option("--applies-to <agent|all>", "applies_to кандидата", "all")
+  .option("--agent <agentId>", "агент задачи", "dsh");
+
+reviewRecord.action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+  try {
+    const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+    const backend = openBackend(globalOpts);
+    const store = backend.store;
+    const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+    const source = req(opts, "source");
+    if (source !== "human" && source !== "critic") {
+      throw new EvolveError("REVIEW_BAD_SOURCE", `--source: ${source} (human|critic)`);
+    }
+    const rating = Number(req(opts, "rating"));
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+      throw new EvolveError("REVIEW_BAD_RATING", `--rating: ${opts["rating"]} (1..5)`);
+    }
+    const lesson = opts["lesson"];
+    const issue: ReviewIssue = {
+      type: (opts["issueType"] as ReviewIssue["type"] | undefined) ?? "other",
+      severity: (opts["issueSeverity"] as ReviewIssue["severity"] | undefined) ?? "med",
+      evidence: opts["evidence"] ?? "",
+      ...(lesson != null ? { lessonCandidate: lesson } : {}),
+    };
+    const outcome = await recordReview(
+      store,
+      config,
+      {
+        taskId: req(opts, "taskId"),
+        source,
+        agentId: req(opts, "agent"),
+        rating,
+        transcriptHash: req(opts, "transcriptHash"),
+        commit: opts["commit"] ?? "none",
+        issues: [issue],
+        llm: new MockLlm(),
+        ...(opts["type"] != null ? { type: opts["type"] as CandidateType } : {}),
+        ...(opts["scope"] != null ? { scope: opts["scope"] } : {}),
+        ...(opts["appliesTo"] != null ? { appliesTo: opts["appliesTo"] } : {}),
+      },
+      new Date(),
+    );
+    console.log(`review_recorded: ${req(opts, "taskId")} source=${source} rating=${rating} issues=1`);
+    for (const r of outcome.candidates) {
+      if (r.gates.decision === "accept") {
+        console.log(`  [accept] risk=${r.gates.riskTier} → item ${shortId((r.item as { id: string }).id)} status=${r.item?.status}`);
+      } else if (r.gates.decision === "merge") {
+        console.log(`  [merge] дубль item ${shortId(r.gates.mergeItemId ?? "")}, не создан новый элемент`);
+      } else {
+        const failed = r.gates.results.find((g) => g.outcome === "fail");
+        console.log(`  [reject] ${failed ? failed.gate + ": " + String(failed.detail["reason"] ?? "") : r.gates.reason ?? ""}`);
+      }
+    }
+    await closeBackend(backend);
+  } catch (err) {
+    fail(err);
+  }
+});
+
+reviewCmd.addCommand(reviewRecord);
+program.addCommand(reviewCmd);
 program.addCommand(reportCmd);
 program.addCommand(decayCmd);
 program.addCommand(rollbackCmd);
