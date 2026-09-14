@@ -32,6 +32,11 @@ ON CONFLICT (agent_id) DO NOTHING;
 
 ## 2. Рецепт для DSH (bash-инструмент)
 
+> Установлен: `~/.dsh/skills/evolve/SKILL.md` (2026-09-14, Op.3a). Первый
+> реальный цикл пройден на живой сессии: `task start` → `inject knowledge`
+> (4 знания, 14 ms, usage_log) → `review record` (урок → canary) →
+> `task verify` (success, верификатор tests) → `scores recompute`.
+
 Системный промпт / скилл-инструкция для DSH-агента (копируется в
 `~/.dsh/skills/evolve/SKILL.md` или в системный промпт сессии):
 
