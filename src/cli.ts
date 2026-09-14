@@ -47,6 +47,7 @@ import { recordReview, type ReviewIssue } from "./review/review.js";
 import { latestCriticWeight, recomputeCriticWeight } from "./critic/critic.js";
 import { auditAgentAgnostic } from "./audit/agent-agnostic.js";
 import { runTransferEval } from "./audit/transfer.js";
+import { decideProposal, listProposals, runProposer } from "./meta/proposer.js";
 import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -1283,6 +1284,124 @@ ablationCmd
     }
   });
 
+const metaCmd = new Command("meta")
+  .description("meta-оптимизация: proposer предлагает правки harness в очередь человека (ТЗ §15/M6)");
+
+metaCmd
+  .command("propose")
+  .description("прогнать proposer: сигналы 30 дней → кандидаты правок (тема/поле/old→new/rationale)")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const config = loadConfig((cmd.optsWithGlobals() as ItemOptions).config ?? resolveConfigPath());
+      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+      const pool = new Pool({ connectionString: dbUrl });
+      try {
+        const res = await runProposer(pool, config, new Date());
+        if (res.created.length === 0) {
+          console.log(`предложений нет${res.skippedDuplicates > 0 ? ` (пропущено дубликатов: ${res.skippedDuplicates})` : ""}`);
+          return;
+        }
+        for (const p of res.created) {
+          console.log(`+ ${p.field}: ${p.oldValue} → ${p.newValue} (${p.target})`);
+          console.log(`  ${p.rationale}`);
+          console.log(`  evidence: ${JSON.stringify(p.evidence)}`);
+        }
+        if (res.skippedDuplicates > 0) {
+          console.log(`пропущено дубликатов (уже в очереди): ${res.skippedDuplicates}`);
+        }
+        console.log("кандидаты в очереди: meta proposals; решение — человек + метрики (harness.md §9)");
+      } finally {
+        await pool.end();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+metaCmd
+  .command("proposals")
+  .description("очередь кандидатов правок harness")
+  .option("--status <s>", "фильтр: proposed|accepted|rejected|applied")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+      const pool = new Pool({ connectionString: dbUrl });
+      try {
+        const rows = await listProposals(pool, (opts["status"] as string | undefined) ?? "proposed");
+        if (rows.length === 0) {
+          console.log("очередь пуста");
+          return;
+        }
+        for (const r of rows) {
+          console.log(`${String(r["status"]).padEnd(9)} ${String(r["field"]).padEnd(20)} ${String(r["old_value"])} → ${String(r["new_value"])}`);
+          console.log(`  id=${String(r["id"]).slice(0, 8)}… ${r["rationale"]}`);
+        }
+      } finally {
+        await pool.end();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+const decideOpts = (opts: Record<string, string | undefined>, cmd: Command): { pool: Pool; id: string; by: string; notes: string } => {
+  const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+  const id = opts["id"] as string;
+  const by = (opts["by"] as string | undefined) ?? "human:cli";
+  const notes = (opts["notes"] as string | undefined) ?? "";
+  return { pool: new Pool({ connectionString: dbUrl }), id, by, notes };
+};
+
+metaCmd
+  .command("apply <id>")
+  .description("решение человека: правка применена (дальше — правка config.yaml/harness.md в git + commit)")
+  .option("--by <name>", "кто решил (human:…)")
+  .option("--notes <text>", "заметка (ссылка на данные, golden-эвалуацию)")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const { pool, by, notes } = decideOpts(opts, cmd);
+      try {
+        const row = await decideProposal(pool, id, "applied", by, notes, new Date());
+        if (!row) {
+          throw new Error(`предложение ${id.slice(0, 8)}… не найдено или уже решено`);
+        }
+        console.log(`applied: ${row["field"]} ${row["old_value"]} → ${row["new_value"]} (${by})`);
+        console.log("напоминание: внесите правку в config.yaml/harness.md и закоммитьте (change control, harness.md §9)");
+      } finally {
+        await pool.end();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+metaCmd
+  .command("reject <id>")
+  .description("решение человека: правка отклонена")
+  .option("--by <name>", "кто решил (human:…)")
+  .option("--notes <text>", "причина")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const { pool, by, notes } = decideOpts(opts, cmd);
+      try {
+        const row = await decideProposal(pool, id, "rejected", by, notes, new Date());
+        if (!row) {
+          throw new Error(`предложение ${id.slice(0, 8)}… не найдено или уже решено`);
+        }
+        console.log(`rejected: ${row["field"]} ${row["old_value"]} → ${row["new_value"]} (${by})${notes ? ` — ${notes}` : ""}`);
+      } finally {
+        await pool.end();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(metaCmd);
 program.addCommand(ablationCmd);
 program.addCommand(transferCmd);
 program.addCommand(auditCmd);

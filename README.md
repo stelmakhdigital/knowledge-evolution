@@ -148,6 +148,34 @@ node dist/cli.js review record --db "$EVOLVE_DB_URL" \
 heuristic с scope=all → risk=high → queue (ручное ревью команды);
 повторный lesson → merge (G2), issue без lesson — только телеметрия.
 
+## Meta-оптимизация: proposer (M6.1)
+
+Agentic proposer (ТЗ §15/M6, harness.md §9) читает telemetry за 30 дней
+(`gate_results`, `usage_log`, `decisions`, бюджеты) и предлагает **кандидатные
+правки harness** в очередь человека: proposer не меняет harness напрямую —
+решения принимают человек + метрики (промоут правки только при success-rate
+на golden ≥ baseline + 5 п.п. И cost ≤ baseline). M6.1 — детерминированные
+правила по сигналам (LLM-пропонер — M6.2, интерфейс готов):
+
+- S1: G2 pass < 50% (≥10) → поднять `theta_dedup` на 0.05 (дедуп-шум);
+- S2: active > 80% бюджета → ускорить деградацию (`theta_score` −0.05);
+- S3: success-rate агента < baseline − 0.1 (verdicts ≥ 10) → недельный
+  ablation-эксперимент (`ablation.negative: false`, ТЗ §12.4);
+- S4: canary demote ≥ 30% (≥5) → поднять `canary.min_retrievals`.
+
+Каждое предложение: тема/поле, old → new, rationale + evidence (ссылка на
+данные); идемпотентность по (field, new_value) в активном статусе.
+
+```bash
+node dist/cli.js meta propose --db "$EVOLVE_DB_URL"
+node dist/cli.js meta proposals --db "$EVOLVE_DB_URL" [--status proposed]
+node dist/cli.js meta apply <id> --by human:name --notes "golden-эвалуация: +6 п.п."
+node dist/cli.js meta reject <id> --notes "нет данных"
+```
+
+`apply` — решение человека: запись `proposals` (status=applied) + напоминание
+внести правку в `config.yaml`/`harness.md` и закоммитить (change control).
+
 ## Harness-документ и ablation (M6.0)
 
 Политика harness зафиксирована в **`harness.md`** (ТЗ §5.1): NL-документ,
