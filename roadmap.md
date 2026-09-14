@@ -21,22 +21,12 @@
 
 ## Задачи (текущая фаза)
 
-### Фаза 1: M0 — каркас (неделя 1)
+### Фаза 3: M2 — retrieval + телеметрия + canary (неделя 3+) — текущая
 
-- [x] Roadmap и проектная память: `roadmap.md`, `PROJECT_MEMORY.md` (2026-09-14)
-- [x] Каркас: `package.json`/`tsconfig.json` (strict, ESM), `config.yaml` (все пороги/бюджеты ТЗ §19) + zod-валидация, доменные типы (ТЗ §7–§8) (2026-09-14)
-- [x] Стейт-машина статусов (candidate→queued→canary→active→deprecated→archived): допустимые переходы, запись в `decisions` на каждый переход (actor, reason, evidence) + юнит-тесты (2026-09-14)
-- [x] Гейты G1–G5 (evidence, dedup, conflict, scope, budget) на мок-LLM + DDL `db/schema.sql` (ТЗ §7.1) + юнит-тесты (2026-09-14)
-- [x] CLI `evolve`: `item add/list/transition/show` (show — white-box drill-down, ТЗ §7.2.6) + ручной прогон кандидата через все гейты и статусы (критерий M0) (2026-09-14)
-- [x] Компиляция (tsc) и тесты (vitest) зелёные (70/70) (2026-09-14)
-
-### Фаза 2: M1 — экстрактор + гейты (недели 2–3) — закрыта 2026-09-14
-
-- [x] Триггер «успех задачи»: телеметрия `task start/use/verify`, usage_log ДО вердикта, backfill task_success, verifier_id/human_override (ТЗ §11.1/§11.4) (2026-09-14)
-- [x] LLM-экстрактор: схемы кандидатов, prompt со схемой + few-shot (ТЗ §16), JsonExtractor (zod) + MockExtractor, CLI `extract run` (2026-09-14)
-- [x] CLI-очередь high-risk: карточки (провенанс, цена бездействия, возраст, STALE>14д, противоречия), accept / accept-edit (approve_edit) / reject с обязательной причиной → decisions (ТЗ §12.1) (2026-09-14)
-- [ ] Критерий M1-качество: замер на 20 реальных задачах (≥ 70% через G1–G5, ложных ≤ 3) — операционно, на реальных сессиях DSH (инфраструктура меряния готова)
-
+- [x] M2.1: Postgres 16 + pgvector (локальный кластер без sudo), миграции `db/migrations/` + CLI `evolve migrate`, `AsyncStore` + `PgStore` (контракт ТЗ §7.2 на живом PG) (2026-09-14)
+- [ ] M2.2: Retrieval-сервис: hybrid (BM25 + vector + RRF, ТЗ §10.1), `/retrieve` (HTTP), budget-охраны (ТЗ §19), agent-профили (top_k/format), golden-набор 30 задач (recall@5 ≥ 0.7)
+- [ ] M2.3: Score по (item, agent) из usage_log (success_rate, used≥5) + canary-цикл авто-решениями (окно 7д/3 извлечения, ε=5%, cost-gate ×1.2, ТЗ §9)
+- [ ] M2.4: End-to-end на PG (add → retrieve → canary → active) + CLI на Postgres; критерий M2: canary-цикл без ручного вмешательства
 
 ## Требования (Must → user story)
 
