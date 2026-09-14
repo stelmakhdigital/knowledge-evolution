@@ -3,6 +3,9 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# evolve: локальное состояние M0 (in-memory store → JSON; Postgres — M2)
+.evolve/
+
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
 /graft/

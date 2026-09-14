@@ -37,6 +37,18 @@ export interface CreateItemInput {
   readonly initialDecision: Omit<Decision, "id" | "createdAt">;
 }
 
+/** JSON-сериализуемый снимок состояния хранилища (M0: CLI-персистентность). */
+export interface StoreSnapshot {
+  items: readonly Item[];
+  versions: Readonly<Record<string, readonly ItemVersion[]>>;
+  provenance: Readonly<Record<string, readonly Provenance[]>>;
+  decisions: Readonly<Record<string, readonly Decision[]>>;
+  gateResults: Readonly<Record<string, readonly GateResult[]>>;
+  usage: Readonly<Record<string, readonly UsageLogEntry[]>>;
+  contradictions: readonly Contradiction[];
+  profiles: Readonly<Record<string, AgentProfile>>;
+}
+
 export interface Store {
   // --- items ---
   /** Создаёт item (обязательно status='candidate') + провенанс + decision. */

@@ -16,7 +16,7 @@ import type {
   Provenance,
   UsageLogEntry,
 } from "../domain/types.js";
-import type { CreateItemInput, Store, TransitionInput } from "./store.js";
+import type { CreateItemInput, Store, StoreSnapshot, TransitionInput } from "./store.js";
 
 /**
  * In-memory хранилище (M0). Детерминированность: время — через инъекцию Clock,
@@ -33,8 +33,32 @@ export class MemoryStore implements Store {
   private readonly contradictions: Contradiction[] = [];
   private readonly profiles = new Map<string, AgentProfile>();
 
-  constructor(clock: Clock = () => new Date()) {
+  constructor(clock: Clock = () => new Date(), snapshot?: StoreSnapshot) {
     this.clock = clock;
+    if (snapshot) {
+      // Поля могут отсутствовать (обрезанный файл) — нормализуем к пустым коллекциям.
+      const items = snapshot.items ?? [];
+      const versions = snapshot.versions ?? {};
+      const provenance = snapshot.provenance ?? {};
+      const decisions = snapshot.decisions ?? {};
+      const gateResults = snapshot.gateResults ?? {};
+      const usage = snapshot.usage ?? {};
+      const contradictions = snapshot.contradictions ?? [];
+      const profiles = snapshot.profiles ?? {};
+      this.items = new Map(items.map((i) => [i.id, { ...i }]));
+      this.versions = new Map(Object.entries(versions).map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+      this.provenance = new Map(Object.entries(provenance).map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+      this.decisions = new Map(Object.entries(decisions).map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+      this.gateResults = new Map(
+        Object.entries(gateResults).map(([k, v]) => [
+          k,
+          v.map((x) => ({ ...x, detail: { ...x.detail } })),
+        ]),
+      );
+      this.usage = new Map(Object.entries(usage).map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+      this.contradictions = contradictions.map((c) => ({ ...c }));
+      this.profiles = new Map(Object.entries(profiles).map(([k, v]) => [k, { ...v }]));
+    }
   }
 
   // --- items ---
@@ -235,6 +259,29 @@ export class MemoryStore implements Store {
 
   private now(): string {
     return this.clock().toISOString();
+  }
+
+  // --- сериализация (CLI: состояние между вызовами, M0; Postgres — M2) ---
+
+  /** Плоский JSON-снимок всего состояния. */
+  snapshot(): StoreSnapshot {
+    const byKey = <T,>(map: Map<string, T[]>): Record<string, T[]> =>
+      Object.fromEntries([...map.entries()].map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+    return {
+      items: [...this.items.values()].map((i) => ({ ...i })),
+      versions: byKey(this.versions),
+      provenance: byKey(this.provenance),
+      decisions: byKey(this.decisions),
+      gateResults: byKey(this.gateResults),
+      usage: byKey(this.usage),
+      contradictions: this.contradictions.map((c) => ({ ...c })),
+      profiles: Object.fromEntries([...this.profiles.entries()].map(([k, v]) => [k, { ...v }])),
+    };
+  }
+
+  /** Восстановление из снапшота (инварианты перепроверяются при мутациях, не при загрузке). */
+  static fromSnapshot(snapshot: StoreSnapshot, clock: Clock = () => new Date()): MemoryStore {
+    return new MemoryStore(clock, snapshot);
   }
 
   private recordDecision(
