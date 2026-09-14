@@ -69,6 +69,12 @@ export function checkTransition(req: TransitionRequest): TransitionEdge {
   const edges = STATE_MACHINE[req.from];
   const edge = edges.find((e) => e.to === req.to && e.kind === req.kind);
   if (!edge) {
+    const kindsToTarget = edges.filter((e) => e.to === req.to).map((e) => `'${e.kind}'`);
+    if (kindsToTarget.length > 0) {
+      throw new InvalidTransitionError(
+        `переход ${req.from} → ${req.to} требует kind=${kindsToTarget.join(" или kind=")}, передано '${req.kind}'`,
+      );
+    }
     throw new InvalidTransitionError(
       `переход ${req.from} → ${req.to} запрещён стейт-машиной (допустимые: ${
         edges.length > 0 ? edges.map((e) => e.to).join(", ") : "нет — терминальный статус"
