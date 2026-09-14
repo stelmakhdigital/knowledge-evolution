@@ -22,11 +22,11 @@ export class MockLlm implements LlmClient {
   private readonly conflictPairs: ReadonlyArray<readonly [string, string]>;
 
   /**
-   * @param dim размерность эмбеддинга (дефолт 64 — меньше коллизий хэша токенов,
-   *            чтобы cos_sim уникальных текстов оставался заметно ниже θ_dedup)
+   * @param dim размерность эмбеддинга (дефолт 1536 — размерность модели TЗ §7.1, embeddings vector(1536);
+   *            частотный профиль токенов: cos_sim уникальных текстов заметно ниже θ_dedup)
    * @param conflictPairs пары фрагментов, которые «противоречат» (для сценариев G3)
    */
-  constructor(dim = 64, conflictPairs: ReadonlyArray<readonly [string, string]> = []) {
+  constructor(dim = 1536, conflictPairs: ReadonlyArray<readonly [string, string]> = []) {
     this.dim = dim;
     this.conflictPairs = conflictPairs;
   }

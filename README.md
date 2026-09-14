@@ -74,6 +74,26 @@ node dist/cli.js extract run --task-id task-99 --transcript-file /tmp/transcript
 Коды выхода `item add` / `extract run`: 0 — accept/merge, 1 — reject (гейт не пройден) или ошибка.
 `--verifier` обязателен для прохождения G1 (self-reported успех запрещён, ТЗ §9).
 
+## Retrieval (M2)
+
+Hybrid-поиск (ТЗ §10.1): keyword-канал (FTS `simple` + pg_trgm) + vector-канал
+(pgvector, cosine, ленивое индексирование версий) → RRF-фьюжн → финальный ранк
+по весам `config.retrieval` (`rrf_rank/item_score/scope_match/recency_decay`).
+Извлекаются только active/canary; `applies_to`: 'all' | agent_id (ТЗ §14.2).
+Budget-гварды (ТЗ §19): per-item/total-обрезка тел, timeout (деградация —
+пустой ответ, задача не блокируется). С `task_id` — запись usage_log
+(знание доступно ДО задачи, ТЗ §10.3).
+
+```bash
+node dist/cli.js retrieve --query "как безопасно изменить схему БД" --agent dsh --task-id t1
+node dist/cli.js retrieve --query "секреты и .env" --agent dsh --format markdown
+node dist/cli.js serve --port 3100   # HTTP: POST /retrieve, GET /health
+curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"dsh","task_id":"t1"}'
+```
+
+Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
+`test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
+
 ## Postgres (M2)
 
 Схема — `db/schema.sql` (контракт, TЗ §7.1), миграции — `db/migrations/`

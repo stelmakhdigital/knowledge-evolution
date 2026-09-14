@@ -36,6 +36,9 @@ import { MockExtractor, toDomainCandidate } from "./extractor/extractor.js";
 import { buildQueueCard, listQueueCards } from "./queue/queue.js";
 import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
+import { PgStore } from "./store/pg-store.js";
+import { retrieve } from "./retrieval/search.js";
+import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
 
 const SOURCE_TYPES: readonly ProvenanceSourceType[] = ["success", "review", "critic", "human"];
@@ -811,6 +814,72 @@ migrateCmd.action(async (opts: Record<string, string | undefined>) => {
   }
 });
 
+const retrieveCmd = new Command("retrieve")
+  .description("retrieval: запрос → знания (M2, ТЗ §10); источник — Postgres")
+  .requiredOption("--query <q>", "запрос (вопрос/описание задачи)")
+  .option("--agent <agentId>", "ид агента", "dsh")
+  .option("--task-id <id>", "id задачи (запишет usage_log)")
+  .option("--scope-hints <hints>", "scope-подсказки через запятую", "")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .option("--format <fmt>", "json|markdown", "json");
+
+retrieveCmd.action(async (opts: Record<string, string | undefined>) => {
+  try {
+    const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+    const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+    try {
+      const result = await retrieve(
+        store.pool,
+        {
+          query: req(opts, "query"),
+          agentId: req(opts, "agent"),
+          taskId: (opts["taskId"] as string | undefined) ?? undefined,
+          scopeHints: (opts["scopeHints"] ?? "").split(",").map((s2) => s2.trim()).filter(Boolean),
+        },
+        config,
+        new MockLlm(),
+      );
+      const out = formatResponse(result, (opts["format"] ?? "json") as ResponseFormat, null);
+      console.log(typeof out === "string" ? out : JSON.stringify(out, null, 2));
+      if (result.timedOut) {
+        process.exitCode = 2;
+      }
+    } finally {
+      await store.close();
+    }
+  } catch (err) {
+    fail(err);
+  }
+});
+
+const serveCmd = new Command("serve")
+  .description("retrieval-сервис: HTTP POST /retrieve + GET /health (ТЗ §10)")
+  .option("--port <port>", "порт", "3100")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL);
+
+serveCmd.action(async (opts: Record<string, string | undefined>) => {
+  try {
+    const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+    const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+    const server = createRetrieveServer({ pool: store.pool, config, llm: new MockLlm() });
+    const port = Number.parseInt(opts["port"] ?? "3100", 10);
+    server.listen(port, () => {
+      console.log(`evolve serve: http://127.0.0.1:${port} (mode=${config.retrieval.mode}, db=${opts["db"] ?? DEFAULT_DB_URL})`);
+    });
+    const shutdown = async (): Promise<void> => {
+      server.close();
+      await store.close();
+      process.exit(0);
+    };
+    process.on("SIGINT", () => void shutdown());
+    process.on("SIGTERM", () => void shutdown());
+  } catch (err) {
+    fail(err);
+  }
+});
+
+program.addCommand(retrieveCmd);
+program.addCommand(serveCmd);
 program.addCommand(migrateCmd);
 
 try {

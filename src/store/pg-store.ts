@@ -36,7 +36,7 @@ const iso = (v: Date | string | null | undefined): string =>
   v == null ? "" : (v instanceof Date ? v.toISOString() : String(v));
 
 export class PgStore implements AsyncStore {
-  private readonly pool: Pool;
+  readonly pool: Pool;
   private readonly clock: Clock;
   private closed = false;
 
