@@ -112,6 +112,21 @@ curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"ds
 Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
 `test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
 
+## Недельный отчёт и алерты (M3)
+
+`report weekly` — сводка за 7 дней (ТЗ §15 M3: «недельное окно ≤ 20 минут»):
+success-rate по агентам (вердикты верификатора), canary-итоги (auto-решения),
+churn (demotion/auto:degradation), застой очереди (> 14д в queue) и алерты по
+`config.alerts` (ТЗ §12.2: «только сигналы, иначе система молчит»):
+active > 90% бюджета, открытые противоречия > 5, −5% success-rate за 2 нед при
+росте базы, > 5 demotion/нед, карточка в queue > 14д, рост стоимости > 15%
+(М3-прокси стоимости: средняя длина inject-тел на запрос).
+
+```bash
+node dist/cli.js report weekly --db "$EVOLVE_DB_URL"          # markdown
+node dist/cli.js report weekly --db "$EVOLVE_DB_URL" --json   # JSON
+```
+
 ## Decay и rollback (M3)
 
 Decay (деградация, ТЗ §9/§16) — ежедневная авто-логика по active-базе:

@@ -42,6 +42,7 @@ import { retrieve } from "./retrieval/search.js";
 import { recomputeScores, itemScoreFor } from "./telemetry/score.js";
 import { evaluateCanaries } from "./canary/canary.js";
 import { runDecay } from "./decay/decay.js";
+import { buildWeeklyReport, renderMarkdown } from "./report/report.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
 
@@ -1053,6 +1054,33 @@ rollbackCmd.action(async (id: string, opts: Record<string, string | undefined>, 
   }
 });
 
+const reportCmd = new Command("report").description("отчётность: недельное окно + алерты (ТЗ §12/§15 M3)");
+
+reportCmd
+  .command("weekly")
+  .description("недельный отчёт: success-rate, canary, churn, очередь, алерты")
+  .option("--json", "вывод JSON")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const report = await buildWeeklyReport(store.pool, config, new Date());
+        if (opts["json"]) {
+          console.log(JSON.stringify(report, null, 2));
+        } else {
+          console.log(renderMarkdown(report));
+        }
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(reportCmd);
 program.addCommand(decayCmd);
 program.addCommand(rollbackCmd);
 program.addCommand(canaryCmd);
