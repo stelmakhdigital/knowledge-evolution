@@ -12,6 +12,7 @@ import type {
   Provenance,
   UsageLogEntry,
 } from "../domain/types.js";
+import type { TelemetryEvent } from "../domain/telemetry.js";
 
 /**
  * Контракт хранилища (ТЗ §7.1). M0 — in-memory; M2 — Postgres (источник правды — SQL).
@@ -45,6 +46,7 @@ export interface StoreSnapshot {
   decisions: Readonly<Record<string, readonly Decision[]>>;
   gateResults: Readonly<Record<string, readonly GateResult[]>>;
   usage: Readonly<Record<string, readonly UsageLogEntry[]>>;
+  events: readonly TelemetryEvent[];
   contradictions: readonly Contradiction[];
   profiles: Readonly<Record<string, AgentProfile>>;
 }
@@ -78,9 +80,17 @@ export interface Store {
   // --- решения (аудит) ---
   decisionsFor(itemId: string): readonly Decision[];
 
-  // --- телеметрия (M2, контракт готов заранее) ---
+  // --- телеметрия (ТЗ §11.1; M1: события, M2: score/per-(item,agent)) ---
   addUsage(entry: UsageLogEntry): void;
   usageFor(itemId: string): readonly UsageLogEntry[];
+  usageForTask(taskId: string): readonly UsageLogEntry[];
+  addEvent(event: TelemetryEvent): void;
+  listEvents(filter?: { taskId?: string }): readonly TelemetryEvent[];
+  /**
+   * Backfill по task_verified: заполняет usage_log.task_success для задачи (ТЗ §10.3).
+   * Конфликт вердиктов — TelemetryError(TELEMETRY_CONFLICT).
+   */
+  backfillUsageForTask(taskId: string, success: boolean): { updated: number; unchanged: number };
 
   // --- противоречия ---
   addContradiction(contradiction: Contradiction): void;

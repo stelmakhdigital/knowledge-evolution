@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { backfillTaskSuccess } from "../domain/telemetry.js";
+import type { TelemetryEvent } from "../domain/telemetry.js";
 import { hashBody } from "../domain/hashing.js";
 import { InvariantViolationError, NotFoundError } from "../domain/errors.js";
 import { checkTransition } from "../domain/state-machine.js";
@@ -30,6 +32,7 @@ export class MemoryStore implements Store {
   private readonly decisions = new Map<string, Decision[]>();
   private readonly gateResults = new Map<string, GateResult[]>();
   private readonly usage = new Map<string, UsageLogEntry[]>();
+  private readonly events: TelemetryEvent[] = [];
   private readonly contradictions: Contradiction[] = [];
   private readonly profiles = new Map<string, AgentProfile>();
 
@@ -43,6 +46,7 @@ export class MemoryStore implements Store {
       const decisions = snapshot.decisions ?? {};
       const gateResults = snapshot.gateResults ?? {};
       const usage = snapshot.usage ?? {};
+      const events = snapshot.events ?? [];
       const contradictions = snapshot.contradictions ?? [];
       const profiles = snapshot.profiles ?? {};
       this.items = new Map(items.map((i) => [i.id, { ...i }]));
@@ -56,6 +60,7 @@ export class MemoryStore implements Store {
         ]),
       );
       this.usage = new Map(Object.entries(usage).map(([k, v]) => [k, v.map((x) => ({ ...x }))]));
+      this.events = events.map((e) => ({ ...e }));
       this.contradictions = contradictions.map((c) => ({ ...c }));
       this.profiles = new Map(Object.entries(profiles).map(([k, v]) => [k, { ...v }]));
     }
@@ -221,6 +226,40 @@ export class MemoryStore implements Store {
     return (this.usage.get(itemId) ?? []).map((u) => ({ ...u }));
   }
 
+  usageForTask(taskId: string): readonly UsageLogEntry[] {
+    return [...this.usage.values()]
+      .flat()
+      .filter((u) => u.taskId === taskId)
+      .map((u) => ({ ...u }));
+  }
+
+  addEvent(event: TelemetryEvent): void {
+    this.events.push({ ...event });
+  }
+
+  listEvents(filter?: { taskId?: string }): readonly TelemetryEvent[] {
+    return this.events
+      .filter((e) => !filter?.taskId || e.task_id === filter.taskId)
+      .map((e) => ({ ...e }));
+  }
+
+  backfillUsageForTask(taskId: string, success: boolean): { updated: number; unchanged: number } {
+    const all = [...this.usage.values()].flat();
+    const { updated, unchanged } = backfillTaskSuccess(all, taskId, success);
+    if (updated.length > 0) {
+      const byId = new Map(updated.map((u) => [u.id, u]));
+      for (const list of this.usage.values()) {
+        for (let i = 0; i < list.length; i += 1) {
+          const replacement = byId.get(list[i]?.id ?? "");
+          if (replacement) {
+            list[i] = replacement;
+          }
+        }
+      }
+    }
+    return { updated: updated.length, unchanged };
+  }
+
   // --- противоречия ---
 
   addContradiction(contradiction: Contradiction): void {
@@ -274,6 +313,7 @@ export class MemoryStore implements Store {
       decisions: byKey(this.decisions),
       gateResults: byKey(this.gateResults),
       usage: byKey(this.usage),
+      events: this.events.map((e) => ({ ...e })),
       contradictions: this.contradictions.map((c) => ({ ...c })),
       profiles: Object.fromEntries([...this.profiles.entries()].map(([k, v]) => [k, { ...v }])),
     };

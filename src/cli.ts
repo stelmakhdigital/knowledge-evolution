@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
+import { type ZodType } from "zod";
 import { ConfigError, loadConfig, resolveConfigPath, type EvolveConfig } from "./config/config.js";
 import { EvolveError } from "./domain/errors.js";
 import { hashBody } from "./domain/hashing.js";
@@ -22,6 +23,12 @@ import {
   type ProvenanceSourceType,
 } from "./domain/types.js";
 import { STATE_MACHINE, allowedTargets, actorClassOf } from "./domain/state-machine.js";
+import {
+  knowledgeUsedSchema,
+  taskStartedSchema,
+  taskVerifiedSchema,
+  TelemetryError,
+} from "./domain/telemetry.js";
 import { admitCandidate } from "./gates/gates.js";
 import { MockLlm } from "./llm/client.js";
 import { MemoryStore } from "./store/memory-store.js";
@@ -30,7 +37,7 @@ import type { StoreSnapshot } from "./store/store.js";
 const SOURCE_TYPES: readonly ProvenanceSourceType[] = ["success", "review", "critic", "human"];
 
 function fail(err: unknown): never {
-  if (err instanceof EvolveError || err instanceof ConfigError) {
+  if (err instanceof EvolveError || err instanceof ConfigError || err instanceof TelemetryError) {
     console.error(`[evolve] ${err.code}: ${err.message}`);
   } else {
     console.error("[evolve] INTERNAL:", err instanceof Error ? err.stack ?? err.message : String(err));
@@ -76,7 +83,7 @@ function shortId(id: string): string {
 }
 
 /** Обязательный опциeнный вариант: commander гарантирует непустое для requiredOption. */
-function req(opts: Record<string, string | undefined>, key: string): string {
+function req(opts: Record<string, unknown>, key: string): string {
   const v = opts[key];
   if (typeof v !== "string" || v.length === 0) {
     throw new EvolveError("MISSING_OPTION", `--${key}: значение не передано`);
@@ -339,7 +346,161 @@ item
     }
   });
 
+// --- телеметрия: события ТЗ §11.1 (M1) ---
+
+const task = new Command("task").description("телеметрия задач: start / use / verify / show (ТЗ §11.1)");
+
+function validated<T>(schema: ZodType<T>, data: unknown): T {
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    throw new TelemetryError(
+      "TELEMETRY_INVALID",
+      parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+    );
+  }
+  return parsed.data;
+}
+
+task
+  .command("start <taskId>")
+  .description("task_started: регистрация задачи")
+  .requiredOption("--agent <agentId>", "ид агента")
+  .option("--scope-hints <hints>", "scope-подсказки через запятую", "")
+  .action((taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const event = validated(taskStartedSchema, {
+        event: "task_started",
+        task_id: taskId,
+        agent_id: req(opts, "agent"),
+        scope_hints: (opts["scopeHints"] ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+        started_at: new Date().toISOString(),
+      });
+      store.addEvent(event);
+      saveStore(store, statePath);
+      console.log(`task_started: ${taskId} (agent=${event.agent_id})`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+task
+  .command("use <taskId>")
+  .description("knowledge_used: запись в usage_log ДО начала задачи (ТЗ §10.3)")
+  .requiredOption("--agent <agentId>", "ид агента")
+  .requiredOption("--item <id>", "id элемента (active/canary)")
+  .action((taskId: string, opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const itemRow = store.getItem(req(opts, "item"));
+      if (!itemRow) {
+        throw new EvolveError("NOT_FOUND", `item ${req(opts, "item")} не найден`);
+      }
+      if (itemRow.status !== "active" && itemRow.status !== "canary") {
+        throw new EvolveError(
+          "ITEM_NOT_RETRIEVABLE",
+          `item ${itemRow.id} в статусе ${itemRow.status}: извлекаются только active/canary (ТЗ §10.3)`,
+        );
+      }
+      const event = validated(knowledgeUsedSchema, {
+        event: "knowledge_used",
+        task_id: taskId,
+        item_id: itemRow.id,
+        version: itemRow.version,
+        agent_id: req(opts, "agent"),
+        used_at: new Date().toISOString(),
+      });
+      store.addEvent(event);
+      store.addUsage({
+        id: `u-${hashBody(`${taskId}:${itemRow.id}:${itemRow.version}:${req(opts, "agent")}`).slice(0, 12)}`,
+        itemId: itemRow.id,
+        version: itemRow.version,
+        agentId: event.agent_id,
+        taskId,
+        taskSuccess: null,
+        retrievedAt: event.used_at,
+      });
+      saveStore(store, statePath);
+      console.log(`knowledge_used: ${taskId} ← item ${shortId(itemRow.id)} v${itemRow.version}`);
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+task
+  .command("verify <taskId>")
+  .description("task_verified: вердикт верификатора + backfill usage_log (ТЗ §11.4)")
+  .requiredOption("--agent <agentId>", "ид агента")
+  .option("--success", "задача успешна", false)
+  .option("--fail", "задача неуспешна", false)
+  .requiredOption("--verifier <v>", "tests|lint|smoke|human")
+  .option("--verifier-id <id>", "конкретный верификатор (ablation, ТЗ §11.4)")
+  .option("--human-override", "ручное переопределение вердикта", false)
+  .action((taskId: string, opts: Record<string, string | boolean | undefined>, cmd: Command) => {
+    try {
+      if (Boolean(opts["success"]) === Boolean(opts["fail"])) {
+        throw new TelemetryError("VERIFY_FLAGS", "укажите ровно одно из --success/--fail");
+      }
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store, statePath } = openStore(globalOpts);
+      const verifier = req(opts, "verifier");
+      const event = validated(taskVerifiedSchema, {
+        event: "task_verified",
+        task_id: taskId,
+        agent_id: req(opts, "agent"),
+        success: Boolean(opts["success"]),
+        verifier,
+        verifier_id: (opts["verifierId"] as string | undefined) ?? verifier,
+        ...(opts["humanOverride"] ? { human_override: true } : {}),
+        verified_at: new Date().toISOString(),
+      });
+      store.addEvent(event);
+      const { updated, unchanged } = store.backfillUsageForTask(taskId, event.success);
+      saveStore(store, statePath);
+      console.log(
+        `task_verified: ${taskId} success=${event.success} (${event.verifier}/${event.verifier_id}) — usage_log обновлено: ${updated}, без изменений: ${unchanged}`,
+      );
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+task
+  .command("show <taskId>")
+  .description("события задачи + состояние usage_log")
+  .action((taskId: string, _opts: unknown, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions;
+      const { store } = openStore(globalOpts);
+      const events = store.listEvents({ taskId });
+      if (events.length === 0) {
+        console.log(`(нет событий для задачи ${taskId})`);
+        return;
+      }
+      for (const e of events) {
+        if (e.event === "task_started") {
+          console.log(`- [${e.started_at}] task_started agent=${e.agent_id} hints=[${e.scope_hints.join(",")}]`);
+        } else if (e.event === "knowledge_used") {
+          console.log(`- [${e.used_at}] knowledge_used item=${shortId(e.item_id)} v${e.version} agent=${e.agent_id}`);
+        } else if (e.event === "task_verified") {
+          console.log(`- [${e.verified_at}] task_verified success=${e.success} verifier=${e.verifier}/${e.verifier_id}${e.human_override ? " (human_override)" : ""}`);
+        } else {
+          console.log(`- [${e.recorded_at}] review_recorded source=${e.source} rating=${e.rating} issues=${e.issues.length}`);
+        }
+      }
+      const usage = store.usageForTask(taskId);
+      if (usage.length > 0) {
+        console.log(`usage_log: ${usage.map((u) => `${shortId(u.itemId)}→${u.taskSuccess === null ? "?" : u.taskSuccess ? "success" : "fail"}`).join(", ")}`);
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
 program.addCommand(item);
+program.addCommand(task);
 
 process.on("unhandledRejection", (reason) => {
   console.error("[evolve] unhandledRejection:", reason instanceof Error ? reason.stack ?? reason.message : String(reason));
