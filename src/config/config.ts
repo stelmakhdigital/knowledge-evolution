@@ -50,6 +50,8 @@ export const evolveConfigSchema = z.object({
     mode: z.enum(["hybrid", "keyword", "embedding"]),
     top_k: z.number().int().positive(),
     rrf_k: z.number().int().positive(),
+    /** Relevance-cutoff (Op.2): finalRank < порога — не в выдачу (0 = off). */
+    min_final_score: z.number().min(0).default(0),
     weights: z.object({
       rrf_rank: z.number().nonnegative(),
       item_score: z.number().nonnegative(),

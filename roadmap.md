@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: эксплуатация стартовала: Op.1 (адаптер inject) готов; дальше — реальные сессии + Op.2 (relevance-cutoff)
+Обновлено: 2026-09-14 · Статус: Op.1/Op.2 готовы; дальше — Op.3 (реальные сессии) и M6.3 (golden)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -56,7 +56,7 @@
 ### Фаза 8: эксплуатация (реальные сессии)
 
 - [x] Op.1: адаптер агента — `evolve inject knowledge` (профиль + retrieval + usage_log) + docs/agent-adapter.md (DSH-рецепт, agent-agnostic)
-- [ ] Op.2: relevance-cutoff в retrieval (сейчас nearest-neighbor всегда что-то отдаёт; порог по finalScore + тесты)
+- [x] Op.2: relevance-cutoff — `retrieval.min_final_score` (0 = off по умолчанию) в retrieve + тесты (хвост подрезается, недостижимый порог → пусто + нет usage)
 - [ ] Op.3: первые реальные сессии DSH с адаптером → телеметрия (success-rate, churn, canary) → weekly report
 - [ ] M6.3: golden-набор задач + golden-эвалуация (промоут правок harness: success-rate ≥ baseline + 5 п.п. И cost ≤ baseline)
 

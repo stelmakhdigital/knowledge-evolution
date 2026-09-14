@@ -41,6 +41,7 @@ retrieval:
   mode: hybrid                 # hybrid | keyword | embedding
   top_k: 5
   rrf_k: 60                    # константа ранжирования RRF
+  min_final_score: 0.0         # Op.2: relevance-cutoff (finalRank < порога не в выдачу; 0 = off)
   weights:                     # ranking = rrf·w1 + item_score·w2 + scope·w3 − recency·w4
     rrf_rank: 1.0
     item_score: 0.5            # score именно для запросившего агента, fallback global

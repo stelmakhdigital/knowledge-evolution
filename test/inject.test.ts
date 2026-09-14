@@ -17,6 +17,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const ADMIN_URL = process.env["EVOLVE_ADMIN_URL"] ?? "postgres://arka@127.0.0.1:5432/postgres";
 const INJECT_DB_URL = process.env["EVOLVE_INJECT_DB_URL"] ?? "postgres://arka@127.0.0.1:5432/evolve_inject_test";
+const CUT_DB_URL = process.env["EVOLVE_INJECT_CUT_DB_URL"] ?? "postgres://arka@127.0.0.1:5432/evolve_inject_cut_test";
 
 const pgAvailable = await (async (): Promise<boolean> => {
   try {
@@ -123,6 +124,63 @@ describe.skipIf(!pgAvailable)("адаптер агента: inject (Op.1)", () =
     const out = formatResponse(result, "tool_call", null) as { tool: string; arguments: { items: unknown[] } };
     expect(out.tool).toBe("knowledge");
     expect(out.arguments.items.length).toBeGreaterThan(0);
+  });
+});
+
+describe.skipIf(!pgAvailable)("relevance-cutoff (Op.2): retrieval.min_final_score", () => {
+  let pool: Pool;
+
+  beforeAll(async () => {
+    await freshDb(CUT_DB_URL, "evolve_inject_cut_test");
+    pool = new Pool({ connectionString: CUT_DB_URL, max: 2 });
+    await seedActive(pool, "инструкция по адаптеру миграций", "миграции: сначала прогоняй migration-тест, потом меняй схему");
+    await seedActive(pool, "урок про кэширование запросов", "запросы к базе кэшируй на 60 секунд, инвалидация по записи");
+  }, 60_000);
+  afterAll(async () => {
+    await pool.end();
+  });
+
+  it("дефолт 0 = off: nearest-neighbor возвращает (созвучный запрос)", async () => {
+    const res = await retrieve(
+      pool,
+      { query: "миграции схемы тест", agentId: "dsh" },
+      CONFIG,
+      new MockLlm(),
+      NOW,
+    );
+    expect(res.items.length).toBeGreaterThan(0);
+    expect(res.items.some((r) => r.item.title === "инструкция по адаптеру миграций")).toBe(true);
+  });
+
+  it("cutoff: хвост выдачи подрезается, а недостижимый порог — пустота", async () => {
+    const base = await retrieve(
+      pool,
+      { query: "миграции схемы тест", agentId: "dsh" },
+      CONFIG,
+      new MockLlm(),
+      NOW,
+    );
+    expect(base.items.length).toBeGreaterThanOrEqual(1);
+    const minScore = Math.min(...base.items.map((r) => r.finalScore));
+    const cut = await retrieve(
+      pool,
+      { query: "миграции схемы тест", agentId: "dsh" },
+      { ...CONFIG, retrieval: { ...CONFIG.retrieval, min_final_score: minScore + 0.001 } },
+      new MockLlm(),
+      NOW,
+    );
+    expect(cut.items.length).toBe(base.items.length - 1); // ровно самый слабый элемент подрезан
+
+    const none = await retrieve(
+      pool,
+      { query: "миграции схемы тест", agentId: "dsh", taskId: "cut-empty-task" },
+      { ...CONFIG, retrieval: { ...CONFIG.retrieval, min_final_score: 10 } },
+      new MockLlm(),
+      NOW,
+    );
+    expect(none.items).toHaveLength(0);
+    const rows = await pool.query(`SELECT count(*)::int AS n FROM usage_log WHERE task_id = 'cut-empty-task'`);
+    expect(Number(rows.rows[0]["n"])).toBe(0); // пусто → usage не пишется
   });
 });
 

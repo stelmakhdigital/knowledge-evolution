@@ -262,7 +262,11 @@ export async function retrieve(
     }
     const fused = rrfFuse(channels, config.retrieval.rrf_k);
     const items = await loadItems(pool, req.agentId);
-    const ranked = finalRank(fused, items, config, req.scopeHints ?? [], now).slice(0, topK);
+    // Relevance-cutoff (Op.2): nearest-neighbor без порога всегда что-то
+    // отдаёт — элементы с finalRank ниже min_final_score не в выдачу (0 = off).
+    const ranked = finalRank(fused, items, config, req.scopeHints ?? [], now)
+      .filter((r) => r.score >= config.retrieval.min_final_score)
+      .slice(0, topK);
     return ranked
       .map((r) => {
         const row = items.get(r.id);

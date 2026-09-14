@@ -226,6 +226,9 @@ node dist/cli.js inject knowledge --db "$EVOLVE_DB_URL" \
 ```
 
 - формат/ top_k / budget — из профиля (без профиля — markdown);
+- relevance-cutoff (Op.2): `retrieval.min_final_score` в config — элементы с
+  finalRank ниже порога не в выдачу (0 = off, по умолчанию); без cutoff
+  nearest-neighbor всегда что-то возвращает;
 - `--task` — запись `usage_log` (знание доступно ДО задачи, ТЗ §10.3);
 - таймаут/ошибка — пустой ответ, задача не блокируется (ТЗ §19);
 - `EVOLVE_INJECT_DEBUG=1` — диагностика в stderr (N элементов, took_ms).
