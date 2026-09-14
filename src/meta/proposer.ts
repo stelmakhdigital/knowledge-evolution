@@ -104,6 +104,44 @@ async function activeProposals(pool: Pool, field: string, newValue: string): Pro
   return Number(res.rows[0]["n"]);
 }
 
+/** Телеметрия за 30 дней — общий контекст для правил (M6.1) и LLM-пропонера (M6.2). */
+export interface TelemetrySnapshot {
+  readonly dedup: DedupSignal;
+  readonly activeCount: number;
+  readonly budget: { active_max: number; pressure: number };
+  readonly successByAgent: Record<string, { sr: number; verdicts: number }>;
+  readonly baseline: number;
+  readonly canary: { promote: number; demote: number };
+  readonly ablation: Record<string, boolean>;
+  readonly proposalsActive: number;
+  readonly windowDays: number;
+}
+
+export async function collectSignals(pool: Pool, config: EvolveConfig, now: Date): Promise<TelemetrySnapshot> {
+  const dedup = await dedupSignal(pool, now);
+  const activeN = await activeCount(pool);
+  const success = await successByAgent(pool);
+  const canary = await canaryOutcome(pool);
+  const activeCountRes = await pool.query(
+    `SELECT count(*)::int AS n FROM proposals WHERE status IN ('proposed', 'accepted', 'applied')`,
+  );
+  const agentMap: Record<string, { sr: number; verdicts: number }> = {};
+  for (const [k, v] of success.byAgent.entries()) {
+    agentMap[k] = { sr: v.sr, verdicts: v.verdicts };
+  }
+  return {
+    dedup,
+    activeCount: activeN,
+    budget: { active_max: config.budget.active_max, pressure: Number((activeN / config.budget.active_max).toFixed(4)) },
+    successByAgent: agentMap,
+    baseline: success.baseline,
+    canary,
+    ablation: { ...config.ablation },
+    proposalsActive: Number(activeCountRes.rows[0]["n"]),
+    windowDays: 30,
+  };
+}
+
 export async function runProposer(pool: Pool, config: EvolveConfig, now: Date): Promise<ProposeResult> {
   const created: Proposal[] = [];
 

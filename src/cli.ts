@@ -47,7 +47,8 @@ import { recordReview, type ReviewIssue } from "./review/review.js";
 import { latestCriticWeight, recomputeCriticWeight } from "./critic/critic.js";
 import { auditAgentAgnostic } from "./audit/agent-agnostic.js";
 import { runTransferEval } from "./audit/transfer.js";
-import { decideProposal, listProposals, runProposer } from "./meta/proposer.js";
+import { decideProposal, listProposals, runProposer, collectSignals } from "./meta/proposer.js";
+import { insertProposals, MockHarnessProposer, validateProposals, type HarnessProposer } from "./llm/proposer.js";
 import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -1290,6 +1291,7 @@ const metaCmd = new Command("meta")
 metaCmd
   .command("propose")
   .description("прогнать proposer: сигналы 30 дней → кандидаты правок (тема/поле/old→new/rationale)")
+  .option("--llm", "дополнительно: LLM-пропонер (M6.2; mock-реализация, валидация + очередь человека)")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
   .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
@@ -1298,19 +1300,50 @@ metaCmd
       const pool = new Pool({ connectionString: dbUrl });
       try {
         const res = await runProposer(pool, config, new Date());
-        if (res.created.length === 0) {
-          console.log(`предложений нет${res.skippedDuplicates > 0 ? ` (пропущено дубликатов: ${res.skippedDuplicates})` : ""}`);
-          return;
-        }
+        let totalCreated = res.created.length;
+        let totalSkipped = res.skippedDuplicates;
         for (const p of res.created) {
           console.log(`+ ${p.field}: ${p.oldValue} → ${p.newValue} (${p.target})`);
           console.log(`  ${p.rationale}`);
           console.log(`  evidence: ${JSON.stringify(p.evidence)}`);
         }
-        if (res.skippedDuplicates > 0) {
-          console.log(`пропущено дубликатов (уже в очереди): ${res.skippedDuplicates}`);
+        if (opts["llm"]) {
+          // M6.2: LLM-пропонер поверх правил (промпт = телеметрия + вырез harness.md).
+          // Реальный LLM — реализация HarnessProposer; здесь — детерминированный mock.
+          const proposer: HarnessProposer = new MockHarnessProposer();
+          const signals = await collectSignals(pool, config, new Date());
+          const harnessDoc = readFileSync(
+            path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "harness.md"),
+            "utf8",
+          );
+          const raw = await proposer.propose({
+            telemetry: signals,
+            config: config as unknown as Record<string, unknown>,
+            harnessDoc,
+          });
+          const report = validateProposals(raw, config);
+          for (const r of report.rejected) {
+            console.log(`✗ (llm ${proposer.name}) ${r.field}: ${r.reason}`);
+          }
+          const inserted = await insertProposals(pool, report.accepted, "harness.md (llm, M6.2)");
+          totalCreated += inserted.created;
+          totalSkipped += inserted.skippedDuplicates;
+          for (const p of report.accepted) {
+            console.log(`+ (llm ${proposer.name}) ${p.field}: ${p.oldValue} → ${p.newValue}`);
+            console.log(`  ${p.rationale}`);
+          }
+          if (inserted.skippedDuplicates > 0) {
+            console.log(`(llm) пропущено дубликатов (уже в очереди): ${inserted.skippedDuplicates}`);
+          }
         }
-        console.log("кандидаты в очереди: meta proposals; решение — человек + метрики (harness.md §9)");
+        if (totalCreated === 0) {
+          console.log(`предложений нет${totalSkipped > 0 ? ` (пропущено дубликатов: ${totalSkipped})` : ""}`);
+        } else {
+          if (totalSkipped > 0) {
+            console.log(`пропущено дубликатов (уже в очереди): ${totalSkipped}`);
+          }
+          console.log("кандидаты в очереди: meta proposals; решение — человек + метрики (harness.md §9)");
+        }
       } finally {
         await pool.end();
       }

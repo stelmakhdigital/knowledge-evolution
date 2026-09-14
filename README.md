@@ -148,6 +148,26 @@ node dist/cli.js review record --db "$EVOLVE_DB_URL" \
 heuristic с scope=all → risk=high → queue (ручное ревью команды);
 повторный lesson → merge (G2), issue без lesson — только телеметрия.
 
+## LLM-пропонер (M6.2)
+
+Поверх детерминированных правил (M6.1) — LLM-пропонер, оперирующий
+**harness-документом** и телеметрией (ТЗ §5.1/§15, harness.md §9):
+промпт-контекст = `collectSignals` (те же 30-дневные сигналы) + вырез
+`harness.md`. Валидация каждого кандидата: whitelist полей (только параметры
+политик: θ, canary, degradation, retrieval, budget, ablation), границы,
+old_value = актульное значение из конфига, нет no-change и дублей в прогоне.
+Валидные — в ту же очередь `proposals` (idempotency по field+new_value).
+Proposer не меняет harness напрямую: очередь человека + промоут по
+golden-эвалуации (success-rate ≥ baseline + 5 п.п. И cost ≤ baseline).
+Реальный LLM — реализация интерфейса `HarnessProposer` поверх API; в
+репозитории — детерминированный `MockHarnessProposer` (тесты, оффлайн).
+
+```bash
+node dist/cli.js meta propose --llm --db "$EVOLVE_DB_URL"
+# ✗ (llm mock) items.max_length: поле не в whitelist harness
+# + (llm mock) retrieval.top_k: 5 → 4  (валидные кандидаты)
+```
+
 ## Meta-оптимизация: proposer (M6.1)
 
 Agentic proposer (ТЗ §15/M6, harness.md §9) читает telemetry за 30 дней

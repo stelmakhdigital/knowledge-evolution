@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: фаза 7 (M6 — meta): M6.0/M6.1 готовы; дальше M6.2 (LLM-пропонер) и эксплуатация
+Обновлено: 2026-09-14 · Статус: фаза 7 (M6 — meta) завершена: M6.0/M6.1/M6.2 готовы; дальше — эксплуатация (реальные сессии)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -50,7 +50,8 @@
 
 - [x] M6.0: harness-документ (`harness.md`, ТЗ §5.1) + ablation-флаги (ТЗ §12.4: dedup/conflict/canary/critic/negative) + `ablation list`
 - [x] M6.1: agentic proposer — сигналы 30 дней (S1–S4) → очередь `proposals` (миграция 005) + CLI meta propose/proposals/apply/reject; решения — человек + метрики (harness.md §9); LLM-пропонер — M6.2
-- [ ] M6.2 (исследование): LLM-пропонер поверх детерминированных правил; golden-эвалуация (success-rate ≥ baseline + 5 п.п. И cost ≤ baseline)
+- [x] M6.2: LLM-пропонер — интерфейс HarnessProposer + валидация (whitelist/границы/old_value) + MockHarnessProposer + `meta propose --llm` (общая очередь proposals)
+- [ ] M6.3 (операционное): золотой набор задач + golden-эвалуация (промоут правок только при success-rate ≥ baseline + 5 п.п. И cost ≤ baseline) — после реальных сессий
 
 ## Требования (Must → user story)
 
