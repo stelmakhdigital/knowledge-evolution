@@ -814,13 +814,23 @@ process.on("unhandledRejection", (reason) => {
 
 const DEFAULT_DB_URL = process.env["EVOLVE_DB_URL"] ?? "postgres://arka@127.0.0.1:5432/evolve";
 
+/**
+ * Разрешение --db: флаг объявлен и на program (глобально), и в субкомандах;
+ * commander кладёт значение пользователя в program-опцию, а дефолт субкоманды
+ * маскирует «отсутствие». Порядок: глобальная (пользователь) → локальная → default.
+ */
+function dbUrlOf(opts: Record<string, unknown>, cmd: Command): string {
+  const g = cmd.optsWithGlobals() as ItemOptions & { db?: string };
+  return (g["db"] as string | undefined) ?? (opts["db"] as string | undefined) ?? DEFAULT_DB_URL;
+}
+
 const migrateCmd = new Command("migrate")
   .description("применить миграции db/migrations/ к Postgres (идемпотентно, schema_migrations)")
   .option("--db <url>", "connection string (default EVOLVE_DB_URL или postgres://arka@127.0.0.1:5432/evolve)");
 
-migrateCmd.action(async (opts: Record<string, string | undefined>) => {
+migrateCmd.action(async (opts: Record<string, string | undefined>, cmd: Command) => {
   try {
-    const dbUrl = opts["db"] ?? DEFAULT_DB_URL;
+    const dbUrl = dbUrlOf(opts, cmd);
     const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
     const dir = path.join(root, "db", "migrations");
     if (!existsSync(dir)) {
@@ -877,10 +887,10 @@ const retrieveCmd = new Command("retrieve")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
   .option("--format <fmt>", "json|markdown", "json");
 
-retrieveCmd.action(async (opts: Record<string, string | undefined>) => {
+retrieveCmd.action(async (opts: Record<string, string | undefined>, cmd: Command) => {
   try {
     const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-    const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+    const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
     try {
       const result = await retrieve(
         store.pool,
@@ -911,14 +921,14 @@ const serveCmd = new Command("serve")
   .option("--port <port>", "порт", "3100")
   .option("--db <url>", "connection string", DEFAULT_DB_URL);
 
-serveCmd.action(async (opts: Record<string, string | undefined>) => {
+serveCmd.action(async (opts: Record<string, string | undefined>, cmd: Command) => {
   try {
     const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-    const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+    const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
     const server = createRetrieveServer({ pool: store.pool, config, llm: new MockLlm() });
     const port = Number.parseInt(opts["port"] ?? "3100", 10);
     server.listen(port, () => {
-      console.log(`evolve serve: http://127.0.0.1:${port} (mode=${config.retrieval.mode}, db=${opts["db"] ?? DEFAULT_DB_URL})`);
+      console.log(`evolve serve: http://127.0.0.1:${port} (mode=${config.retrieval.mode}, db=${dbUrlOf(opts, cmd)})`);
     });
     const shutdown = async (): Promise<void> => {
       server.close();
@@ -938,10 +948,10 @@ canaryCmd
   .command("evaluate")
   .description("прогнать canary-оценку (окно 7д / min_retrievals / ε / cost-gate)")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const verdicts = await evaluateCanaries(store, config, new Date());
         if (verdicts.length === 0) {
@@ -965,10 +975,10 @@ scoresCmd
   .command("recompute")
   .description("идемпотентный пересчёт всех score + score_global")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const n = await recomputeScores(store.pool, config, new Date());
         console.log(`пересчитано пар (item, agent): ${n}`);
@@ -985,9 +995,9 @@ scoresCmd
   .description("score элемента: per-agent + global")
   .option("--agent <agentId>", "ид агента", "dsh")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (id: string, opts: Record<string, string | undefined>) => {
+  .action(async (id: string, opts: Record<string, string | undefined>, cmd: Command) => {
     try {
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const item = await store.getItem(id);
         if (!item) {
@@ -1011,10 +1021,10 @@ decayCmd
   .command("run")
   .description("прогнать decay: unused 21д / θ_score / deprecated 30д → archived / contradiction 7д → queue")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const actions = await runDecay(store, config, new Date());
         if (actions.length === 0) {
@@ -1068,10 +1078,10 @@ reportCmd
   .description("недельный отчёт: success-rate, canary, churn, очередь, алерты")
   .option("--json", "вывод JSON")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const report = await buildWeeklyReport(store.pool, config, new Date());
         if (opts["json"]) {
@@ -1172,10 +1182,10 @@ criticCmd
   .command("reweight")
   .description("пересчёт critic_weight: gate-pass-rate lesson-кандидатов × usage-фактор")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const stats = await recomputeCriticWeight(store, config, new Date());
         const prev = stats.previousWeight == null ? "нет" : stats.previousWeight.toFixed(2);
@@ -1201,7 +1211,7 @@ auditCmd
       loadConfig(resolveConfigPath());
       const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
       // --db декларирован и на программе (глобально): читаем из optsWithGlobals.
-      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"];
+      const dbUrl = dbUrlOf(opts, cmd);
       let pool: Pool | undefined;
       if (dbUrl) {
         pool = new Pool({ connectionString: dbUrl });
@@ -1238,10 +1248,10 @@ transferCmd
   .requiredOption("--profile <agentId>", "альтернативный agent_profile")
   .option("--limit <n>", "размер подвыборки", "20")
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
-  .action(async (opts: Record<string, string | undefined>) => {
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
-      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      const store = new PgStore({ connectionString: dbUrlOf(opts, cmd) });
       try {
         const limit = Number(opts["limit"] ?? 20);
         const summary = await runTransferEval(store, config, new MockLlm(), new Date(), req(opts, "profile"), limit);
@@ -1296,7 +1306,7 @@ metaCmd
   .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
       const config = loadConfig((cmd.optsWithGlobals() as ItemOptions).config ?? resolveConfigPath());
-      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+      const dbUrl = dbUrlOf(opts, cmd);
       const pool = new Pool({ connectionString: dbUrl });
       try {
         const res = await runProposer(pool, config, new Date());
@@ -1359,7 +1369,7 @@ metaCmd
   .option("--db <url>", "connection string", DEFAULT_DB_URL)
   .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
     try {
-      const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+      const dbUrl = dbUrlOf(opts, cmd);
       const pool = new Pool({ connectionString: dbUrl });
       try {
         const rows = await listProposals(pool, (opts["status"] as string | undefined) ?? "proposed");
@@ -1380,7 +1390,7 @@ metaCmd
   });
 
 const decideOpts = (opts: Record<string, string | undefined>, cmd: Command): { pool: Pool; id: string; by: string; notes: string } => {
-  const dbUrl = (opts["db"] as string | undefined) ?? (cmd.optsWithGlobals() as ItemOptions & { db?: string })["db"] ?? DEFAULT_DB_URL;
+  const dbUrl = dbUrlOf(opts, cmd);
   const id = opts["id"] as string;
   const by = (opts["by"] as string | undefined) ?? "human:cli";
   const notes = (opts["notes"] as string | undefined) ?? "";
@@ -1454,7 +1464,7 @@ injectCmd
       const config = loadConfig(globalOpts.config ?? resolveConfigPath());
       // --db объявлен глобально (program) и здесь: глобальный приоритетнее
       // (commander кладёт значение пользователя в program-опцию).
-      const dbUrl = globalOpts["db"] ?? (opts["db"] as string | undefined) ?? DEFAULT_DB_URL;
+      const dbUrl = dbUrlOf(opts, cmd);
       const pool = new Pool({ connectionString: dbUrl });
       try {
         const agentId = opts["agent"] as string;

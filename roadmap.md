@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: Op.1–Op.3 (bootstrap) готовы; идёт эксплуатация (реальные сессии), дальше M6.3 (golden)
+Обновлено: 2026-09-14 · Статус: Op.1–Op.4 готовы (setup-бутстрап, быстрый старт в README); идёт эксплуатация, дальше M6.3 (golden)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -60,6 +60,8 @@
 - [x] Op.3a: bootstrap — скилл `~/.dsh/skills/evolve/SKILL.md` (рецепт DSH) + первый реальный цикл сессии: task start → inject (4 знания, 14ms, usage) → review record (урок про commander --db → canary 82d1e920) → task verify (success, tests) → scores recompute
 - [ ] Op.3b: накопление реальных сессий (цель M1: 20 задач) → weekly report с данными (success-rate, churn, canary-итоги)
 - [ ] M6.3: golden-набор задач + golden-эвалуация (промоут правок harness: success-rate ≥ baseline + 5 п.п. И cost ≤ baseline)
+- [x] Op.4: быстрый старт — `npm run setup` (scripts/setup.sh: Postgres-проверка → БД → расширения → миграции → профиль → DSH-скилл из шаблона → smoke-тест) + README «Быстрый старт (новая система)» и «Подключение кодинг-агента» (DSH-скилл / любой bash-агент / HTTP serve); тест setup.sh (идемпотентность)
+- [x] Фикс commander: глобальный `--db` перехватывал значения субкоманд (дефолт маскировал пользовательский) — единый `dbUrlOf()` (глобальный → локальный → default) во всех PG-командах
 
 ## Требования (Must → user story)
 

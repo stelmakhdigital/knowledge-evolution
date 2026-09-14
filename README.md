@@ -5,28 +5,85 @@
 выполнял задачи успешнее и дешевле. Детали: `knowledge-evolution-tz.md` (ТЗ v0.3),
 состояние проекта — `roadmap.md` и `PROJECT_MEMORY.md`.
 
-## Статус: M0 (каркас)
+## Статус
 
-Готово (M0):
-- доменная модель и стейт-машина статусов (`candidate→queued/canary→active→deprecated→archived`),
-  запись в `decisions` на каждый переход (ТЗ §7.2.3, §9);
-- гейты G1–G5 на детерминированном mock-LLM: evidence, dedup, conflict, scope, budget
-  (ТЗ §9) + `admitCandidate` (кандидат → item → low→canary / high→queued);
-- единый YAML-конфиг всех порогов/бюджетов (ТЗ §5, §19) с zod-валидацией;
-- in-memory store (инварианты ТЗ §7.2/§8) + DDL `db/schema.sql` (Postgres — M2);
-- CLI `evolve`: `item add/list/show/transition/allowed`.
+Готовы все фазы ТЗ: M0 (каркас), M1 (телеметрия), M2 (retrieval/canary/score),
+M3 (decay/отчёты/алерты), M4 (review/критик), M5 (agent-agnostic audit/transfer),
+M6 (harness-документ, ablation, proposer, LLM-пропонер) + эксплуатация
+(адаптер `inject`, DSH-скилл, relevance-cutoff). 185 тестов, tsc strict.
+Дальше — копить реальные сессии (цель M1: 20 задач) и M6.3 (golden-эвалуация).
+Состояние — `roadmap.md`, политика — `harness.md`.
 
-Не готово: M1 (LLM-экстрактор, триггер успеха), M2 (Postgres+pgvector, `/retrieve`, canary-цикл),
-M3 (отчётность/алерты/drift), M4 (критик), M5/M6.
+## Быстрый старт (новая система)
 
-## Установка
+Всё, что нужно агенту: Postgres с расширениемми + одна команда `npm run setup`
+(идемпотентно: БД → миграции → профиль агента → DSH-скилл → smoke-тест).
+
+### 1. Репозиторий
 
 ```bash
+git clone https://github.com/stelmakhdigital/knowledge-evolution.git
+cd knowledge-evolution
 npm install
 npm run build
 ```
 
-## Использование (M0)
+### 2. PostgreSQL 16 (+ pgvector, pg_trgm)
+
+Любой из вариантов — setup проверит сам (`export PSQL=/путь/к/psql`, если psql
+не в PATH):
+
+- **системный Postgres** (apt/brew/nix): установите PostgreSQL 16 и расширения
+  `pg_trgm` (пакет contrib) и `pgvector` (пакет pgvector или сборка из
+  [github.com/pgvector/pgvector](https://github.com/pgvector/pgvector) в тот же
+  prefix);
+- **из исходников в home** (без sudo, рецепт, которым написан этот проект):
+
+  ```bash
+  export PG="$HOME/.pgsql"; mkdir -p "$PG/src" && cd "$PG/src"
+  # Postgres 16
+  curl -LO https://ftp.postgresql.org/pub/source/v16.9/postgresql-16.9.tar.bz2
+  tar xf postgresql-16.9.tar.bz2 && cd postgresql-16.9
+  ./configure --prefix="$PG" && make -j"$(nproc)" && make install
+  cd ..
+  # pgvector (0.7.x) + contrib (pg_trgm)
+  git clone --depth 1 --branch v0.7.4 https://github.com/pgvector/pgvector
+  cd pgvector && PKG_CONFIG_PATH="$PG/lib/pkgconfig" \
+    CFLAGS="-I$PG/include" ./configure --prefix="$PG" && make -j"$(nproc)" && make install
+  # кластер (lokalно: socket + 127.0.0.1, trust-аутентификация)
+  "$PG/bin/initdb" -D "$HOME/pgsql/data"
+  "$PG/bin/pg_ctl" -D "$HOME/pgsql/data" \
+    -o "-p 5432 -k $HOME/pgsql/sock -c listen_addresses=127.0.0.1" \
+    -l /tmp/pg-server.log start
+  export PSQL="$PG/bin/psql"
+  ```
+
+  После перезагрузки система поднимает кластер той же `pg_ctl`-командой
+  (в DSH-скилле это написано).
+
+### 3. Одна команда: БД + миграции + профиль + скилл
+
+```bash
+npm run setup -- --db "postgres://me@127.0.0.1:5432/evolve"
+# флаги: --agent dsh (id агента), --format json|markdown|tool_call (профиль),
+#        --skills-dir ~/.dsh/skills, --skip-skill
+```
+
+setup создаст БД, применит `db/migrations/*`, вставит профиль агента
+(`top_k=5`, budget `8000`, формат из `--format`), установит DSH-скилл
+(`~/.dsh/skills/evolve/SKILL.md`, шаблон — `scripts/skill-template.md`, старый
+файл — в `.bak-<ts>`) и прогонит smoke-тест `inject knowledge`.
+
+### 4. Готово
+
+```bash
+node dist/cli.js inject knowledge --db <DB> --agent dsh --query "тема" --task <task-id>
+```
+
+В новых DSH-сессиях скилл `evolve` подхватится автоматически (он сам знает,
+когда и как запрашивать знания и фиксировать уроки).
+
+## Базовые команды CLI (M0+)
 
 Состояние — локальный файл `.evolve/state.json` (можно переопределить `--state`
 или `EVOLVE_STATE`; с M2 источник правды — Postgres).
@@ -213,25 +270,61 @@ retrieval). Смена флага = правка config.yaml + коммит:
 node dist/cli.js ablation list
 ```
 
-## Адаптер агента (Op.1)
+## Подключение кодинг-агента
 
-Подключение evolve к реальному кодинг-агенту — agent-agnostic (ТЗ §14):
-агент = `--agent <id>` + профиль `agent_profiles`. Полная инструкция:
-[`docs/agent-adapter.md`](docs/agent-adapter.md) (рецепты DSH + любого агента,
-жизненный цикл, диагностика).
+Как прикрутить базу знания к вашему агенту. Agent-agnostic (ТЗ §14):
+агент = `agent_id` + профиль `agent_profiles` — хардкода конкретного агента
+нет; подробности — [`docs/agent-adapter.md`](docs/agent-adapter.md).
+
+### Вариант A: DSH (рекомендуется)
+
+`npm run setup` ставит скилл `~/.dsh/skills/evolve/SKILL.md` — в новых
+сессиях DSH он виден в каталоге скиллов и сам:
+
+- запрашивает знания **до** задачи (`inject knowledge --task <id>`),
+- фиксирует успех (`task verify`) и новые уроки (`review record`) **после**;
+- знает, как поднять Postgres, и не блокирует задачу при ошибке/таймауте.
+
+Обновить скилл после апгрейда репозитория: повторный `npm run setup`
+(шаблон — `scripts/skill-template.md`; старый файл сохраняется в `.bak-<ts>`).
+Свои правки можно вносить прямо в SKILL.md — setup пересоздаёт его из
+шаблона только при повторном запуске (резервная копия остаётся).
+
+### Вариант B: любой агент с bash-доступом
+
+Та же команда, свой `agent_id` и профиль:
 
 ```bash
-node dist/cli.js inject knowledge --db "$EVOLVE_DB_URL" \
-  --agent dsh --query "тема задачи" [--task <task_id>] [--format markdown|json|tool_call]
+# профиль (change control: правки — коммитом)
+psql $DB -c "INSERT INTO agent_profiles (agent_id, context_budget, retrieval_top_k, format)
+             VALUES ('my-agent', 8000, 5, 'markdown')
+             ON CONFLICT (agent_id) DO NOTHING;"
+
+node dist/cli.js inject knowledge --db $DB --agent my-agent \
+  --query "<тема задачи>" --task "<task-id>"
 ```
 
-- формат/ top_k / budget — из профиля (без профиля — markdown);
-- relevance-cutoff (Op.2): `retrieval.min_final_score` в config — элементы с
-  finalRank ниже порога не в выдачу (0 = off, по умолчанию); без cutoff
-  nearest-neighbor всегда что-то возвращает;
-- `--task` — запись `usage_log` (знание доступно ДО задачи, ТЗ §10.3);
-- таймаут/ошибка — пустой ответ, задача не блокируется (ТЗ §19);
-- `EVOLVE_INJECT_DEBUG=1` — диагностика в stderr (N элементов, took_ms).
+Поведенческие уроки (`applies_to=my-agent`, из review/critic) будут попадать
+только этому агенту (ТЗ §14.3).
+
+### Вариант C: агент с HTTP-инструментами
+
+Сервис-режим (без bash): `node dist/cli.js serve --db $DB --port 8787` →
+`POST /retrieve` `{query, agent_id, task_id?, scope_hints?}`; формат ответа —
+по профилю (`json` / `markdown` / `tool_call` — готовый envelope
+`{tool:"knowledge", arguments}` для tool-слоя). `GET /health` — аптайм.
+
+### Жизненный цикл (все варианты)
+
+```
+агент: inject (usage_log ДО задачи)
+  → верификатор: task verify (success → usage_log.task_success)
+    → scores recompute / canary evaluate / decay (cron)
+      → retrieval отдаёт только active/canary со свежим score
+```
+
+Запись знаний — только конвейер (ТЗ §8): extract/review-триггеры → гейты
+G1–G5 → canary/queue. Адаптер (все варианты) — только чтение + телеметрия.
 
 ## Transfer-тест (M5)
 

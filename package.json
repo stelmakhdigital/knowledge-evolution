@@ -11,6 +11,7 @@
   },
   "main": "dist/index.js",
   "scripts": {
+    "setup": "bash scripts/setup.sh",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

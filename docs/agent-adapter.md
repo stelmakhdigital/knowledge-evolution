@@ -4,6 +4,25 @@ Agent-agnostic (ТЗ §14): никакого хардкода конкретно
 `--agent <id>` + профилем `agent_profiles` (format/top_k/budget). Один и тот же
 адаптер работает для DSH, Claude-Code, Copilot или любого другого агента.
 
+**Бутстрап на новой системе — одна команда** (БД + миграции + профиль + скилл
++ smoke-тест, идемпотентно):
+
+```bash
+npm run setup -- --db "postgres://me@127.0.0.1:5432/evolve" \
+  [--agent dsh] [--format json|markdown|tool_call] [--skills-dir ~/.dsh/skills] [--skip-skill]
+```
+
+Шаги setup: проверка node/psql/сервера → `CREATE DATABASE` (если нет) →
+`CREATE EXTENSION vector, pg_trgm` (если нет) → `migrate` → профиль агента
+(не затирает существующий — change control) → рендер `~/.dsh/skills/evolve/SKILL.md`
+из `scripts/skill-template.md` (старый — в `.bak-<ts>`) → smoke-тест inject.
+Шаблон скилла параметризуется (`{{REPO}}`, `{{DB}}`) — правьте шаблон,
+пересоздаётся при повторном setup.
+
+Агенты без bash (только HTTP): `serve --db … --port 8787` → `POST /retrieve`
+`{query, agent_id, task_id?, scope_hints?}`, формат ответа по профилю
+(`tool_call` — готовый envelope `{tool:"knowledge", arguments}` для tool-слоя).
+
 ## 1. Что получает агент
 
 Команда **`evolve inject knowledge`** — единственный путь использования
