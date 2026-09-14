@@ -19,9 +19,20 @@ export interface AgentSuccess {
   readonly successRate: number | null; // null — нет вердиктов
 }
 
+export interface CriticReport {
+  readonly weight: number | null;
+  readonly gatePassRate: number | null;
+  readonly usageFactor: number | null;
+  readonly lessons: number;
+  readonly accepted: number;
+  readonly computedAt: string | null;
+}
+
 export interface WeeklyReport {
   readonly windowStart: string; // ISO
   readonly windowEnd: string; // ISO
+  /** null — пересчёта авто-веса ещё не было (М4.2). */
+  readonly critic: CriticReport | null;
   readonly successByAgent: readonly AgentSuccess[];
   readonly canary: { readonly promoted: readonly string[]; readonly demoted: readonly string[] };
   readonly churn: {
@@ -196,9 +207,28 @@ export async function buildWeeklyReport(pool: Pool, config: EvolveConfig, now: D
     });
   }
 
+  // --- критик: последний авто-вес (М4.2, ТЗ §15 M4 «вес-механика видна в отчёте») ---
+  const criticRow = await pool.query(
+    `SELECT weight, gate_pass_rate, usage_factor, lessons, accepted, computed_at
+     FROM critic_weights WHERE source_id = 'critic'`,
+  );
+  const critic: CriticReport | null = criticRow.rows[0]
+    ? {
+        weight: criticRow.rows[0]["weight"] != null ? Number(criticRow.rows[0]["weight"]) : null,
+        gatePassRate:
+          criticRow.rows[0]["gate_pass_rate"] != null ? Number(criticRow.rows[0]["gate_pass_rate"]) : null,
+        usageFactor:
+          criticRow.rows[0]["usage_factor"] != null ? Number(criticRow.rows[0]["usage_factor"]) : null,
+        lessons: Number(criticRow.rows[0]["lessons"]),
+        accepted: Number(criticRow.rows[0]["accepted"]),
+        computedAt: criticRow.rows[0]["computed_at"] != null ? (criticRow.rows[0]["computed_at"] as Date).toISOString() : null,
+      }
+    : null;
+
   return {
     windowStart: iso(start),
     windowEnd: iso(now),
+    critic,
     successByAgent,
     canary,
     churn,
@@ -219,6 +249,17 @@ export function renderMarkdown(r: WeeklyReport): string {
   for (const a of r.successByAgent) {
     const sr = a.successRate == null ? "н/д" : `${(100 * a.successRate).toFixed(1)}%`;
     lines.push(`- ${a.agentId}: success ${sr} (вердиктов ${a.verdicts}, задач ${a.tasks})`);
+  }
+  lines.push("");
+  lines.push("## Критик (авто-вес, М4.2)");
+  if (r.critic == null) {
+    lines.push("- пересчёт не выполнялся (`critic reweight`)");
+  } else {
+    const w = r.critic.weight == null ? "н/д" : r.critic.weight.toFixed(2);
+    const p = r.critic.gatePassRate == null ? "н/д (нет lesson-кандидатов)" : `${(100 * r.critic.gatePassRate).toFixed(0)}%`;
+    const ok = r.critic.gatePassRate == null ? "" : r.critic.gatePassRate >= 0.5 ? "≥ 50% ✓" : "< 50% — пересмотр промпта критика";
+    lines.push(`- вес: ${w} (gate-pass ${p} ${ok}, usage-фактор ${r.critic.usageFactor?.toFixed(2) ?? "н/д"})`);
+    lines.push(`- lesson-кандидаты: ${r.critic.lessons}, приняты: ${r.critic.accepted}`);
   }
   lines.push("");
   lines.push("## Canary (auto-решения за неделю)");

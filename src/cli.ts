@@ -44,6 +44,7 @@ import { evaluateCanaries } from "./canary/canary.js";
 import { runDecay } from "./decay/decay.js";
 import { buildWeeklyReport, renderMarkdown } from "./report/report.js";
 import { recordReview, type ReviewIssue } from "./review/review.js";
+import { latestCriticWeight, recomputeCriticWeight } from "./critic/critic.js";
 import type { ItemType as CandidateType } from "./domain/types.js";
 import { createRetrieveServer, formatResponse, type ResponseFormat } from "./service/retrieve.js";
 import type { StoreSnapshot } from "./store/store.js";
@@ -1115,6 +1116,8 @@ reviewRecord.action(async (opts: Record<string, string | undefined>, cmd: Comman
       throw new EvolveError("REVIEW_BAD_RATING", `--rating: ${opts["rating"]} (1..5)`);
     }
     const lesson = opts["lesson"];
+    const latestWeight =
+      backend.pg != null && source === "critic" ? await latestCriticWeight(backend.pg.pool) : null;
     const issue: ReviewIssue = {
       type: (opts["issueType"] as ReviewIssue["type"] | undefined) ?? "other",
       severity: (opts["issueSeverity"] as ReviewIssue["severity"] | undefined) ?? "med",
@@ -1136,6 +1139,7 @@ reviewRecord.action(async (opts: Record<string, string | undefined>, cmd: Comman
         ...(opts["type"] != null ? { type: opts["type"] as CandidateType } : {}),
         ...(opts["scope"] != null ? { scope: opts["scope"] } : {}),
         ...(opts["appliesTo"] != null ? { appliesTo: opts["appliesTo"] } : {}),
+        ...(latestWeight != null ? { criticWeight: latestWeight } : {}),
       },
       new Date(),
     );
@@ -1158,6 +1162,31 @@ reviewRecord.action(async (opts: Record<string, string | undefined>, cmd: Comman
 
 reviewCmd.addCommand(reviewRecord);
 program.addCommand(reviewCmd);
+const criticCmd = new Command("critic").description("критик-агент: авто-вес по телеметрии (ТЗ §13, M4.2)");
+
+criticCmd
+  .command("reweight")
+  .description("пересчёт critic_weight: gate-pass-rate lesson-кандидатов × usage-фактор")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>) => {
+    try {
+      const config = loadConfig((opts as ItemOptions).config ?? resolveConfigPath());
+      const store = new PgStore({ connectionString: opts["db"] ?? DEFAULT_DB_URL });
+      try {
+        const stats = await recomputeCriticWeight(store, config, new Date());
+        const prev = stats.previousWeight == null ? "нет" : stats.previousWeight.toFixed(2);
+        console.log(`critic_weight: ${prev} → ${stats.weight.toFixed(2)}`);
+        console.log(`  gate-pass: ${stats.gatePassRate == null ? "н/д" : `${(100 * stats.gatePassRate).toFixed(0)}%`} (lessons ${stats.lessons}, приняты ${stats.accepted})`);
+        console.log(`  usage-фактор: ${stats.usageFactor.toFixed(2)} (verdicts ${stats.criticVerdicts}; critic_sr ${stats.criticSuccessRate == null ? "н/д" : stats.criticSuccessRate.toFixed(2)}, baseline ${stats.baselineSuccessRate == null ? "н/д" : stats.baselineSuccessRate.toFixed(2)})`);
+      } finally {
+        await store.close();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(criticCmd);
 program.addCommand(reportCmd);
 program.addCommand(decayCmd);
 program.addCommand(rollbackCmd);

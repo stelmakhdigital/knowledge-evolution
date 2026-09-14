@@ -40,6 +40,8 @@ export interface ReviewInput {
   readonly type?: Candidate["type"];
   readonly scope?: string;
   readonly appliesTo?: string;
+  /** Последний авто-вес критика (М4.2); null — базовый config.critic.weight. */
+  readonly criticWeight?: number | null;
 }
 
 export interface ReviewOutcome {
@@ -97,7 +99,7 @@ export async function recordReview(
           issue_type: issue.type,
           issue_severity: issue.severity,
           evidence: issue.evidence,
-          critic_weight: config.critic.weight,
+          critic_weight: input.criticWeight ?? config.critic.weight,
         },
         createdAt: now.toISOString(),
       },

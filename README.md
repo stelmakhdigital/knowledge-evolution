@@ -112,6 +112,22 @@ curl -s -X POST http://127.0.0.1:3100/retrieve -d '{"query":"...","agent_id":"ds
 Golden-критерий M2 (recall@5 ≥ 0.7 на 30 задачах, ТЗ §15) —
 `test/retrieval.test.ts` + фикстура `test/golden/` (на живом PG).
 
+## Авто-вес критика (M4.2)
+
+Еженедельный пересчёт `critic_weight` по телеметрии (ТЗ §13/§15 M4):
+`weight = base × (0.5 + 0.5 × gate_pass_rate) × usage_factor` — gate-pass-rate
+(доля lesson-кандидатов критика, прошедших конвейер; merge/reject — не прошли)
+и usage-фактор (success-rate задач, где использовались lesson-элементы критика,
+против общего success-rate; clamp 0.5..1.5; < 5 вердиктов — 1.0). Итог clamp
+0.1..2.0; пересчёт идемпотентный (`critic_weights` — производная от телеметрии).
+Новые critic-ревью используют последний пересчитанный вес (в провенансе),
+вес-механика видна в `report weekly` (секция «Критик»):
+
+```bash
+node dist/cli.js critic reweight --db "$EVOLVE_DB_URL"
+node dist/cli.js report weekly --db "$EVOLVE_DB_URL"   # секция «Критик»
+```
+
 ## Review-триггер и критик (M4)
 
 Структурированный фидбэк человека или критик-агента (ТЗ §13): оценка 1..5 +
