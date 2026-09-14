@@ -93,7 +93,10 @@ export function createRetrieveServer(opts: RetrieveServiceOptions): http.Server 
       llm,
     );
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify(formatResponse(result, format, profileRow), null, 2));
+    const profileObj = profileRow
+      ? { retrievalTopK: Number(profileRow["retrieval_top_k"]), contextBudget: Number(profileRow["context_budget"]) }
+      : null;
+    res.end(JSON.stringify(formatResponse(result, format, profileObj), null, 2));
   }
 
   const server = http.createServer(async (req, res) => {

@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: фаза 7 (M6 — meta) завершена: M6.0/M6.1/M6.2 готовы; дальше — эксплуатация (реальные сессии)
+Обновлено: 2026-09-14 · Статус: эксплуатация стартовала: Op.1 (адаптер inject) готов; дальше — реальные сессии + Op.2 (relevance-cutoff)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -52,6 +52,13 @@
 - [x] M6.1: agentic proposer — сигналы 30 дней (S1–S4) → очередь `proposals` (миграция 005) + CLI meta propose/proposals/apply/reject; решения — человек + метрики (harness.md §9); LLM-пропонер — M6.2
 - [x] M6.2: LLM-пропонер — интерфейс HarnessProposer + валидация (whitelist/границы/old_value) + MockHarnessProposer + `meta propose --llm` (общая очередь proposals)
 - [ ] M6.3 (операционное): золотой набор задач + golden-эвалуация (промоут правок только при success-rate ≥ baseline + 5 п.п. И cost ≤ baseline) — после реальных сессий
+
+### Фаза 8: эксплуатация (реальные сессии)
+
+- [x] Op.1: адаптер агента — `evolve inject knowledge` (профиль + retrieval + usage_log) + docs/agent-adapter.md (DSH-рецепт, agent-agnostic)
+- [ ] Op.2: relevance-cutoff в retrieval (сейчас nearest-neighbor всегда что-то отдаёт; порог по finalScore + тесты)
+- [ ] Op.3: первые реальные сессии DSH с адаптером → телеметрия (success-rate, churn, canary) → weekly report
+- [ ] M6.3: golden-набор задач + golden-эвалуация (промоут правок harness: success-rate ≥ baseline + 5 п.п. И cost ≤ baseline)
 
 ## Требования (Must → user story)
 

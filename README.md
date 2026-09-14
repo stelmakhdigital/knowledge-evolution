@@ -213,6 +213,23 @@ retrieval). Смена флага = правка config.yaml + коммит:
 node dist/cli.js ablation list
 ```
 
+## Адаптер агента (Op.1)
+
+Подключение evolve к реальному кодинг-агенту — agent-agnostic (ТЗ §14):
+агент = `--agent <id>` + профиль `agent_profiles`. Полная инструкция:
+[`docs/agent-adapter.md`](docs/agent-adapter.md) (рецепты DSH + любого агента,
+жизненный цикл, диагностика).
+
+```bash
+node dist/cli.js inject knowledge --db "$EVOLVE_DB_URL" \
+  --agent dsh --query "тема задачи" [--task <task_id>] [--format markdown|json|tool_call]
+```
+
+- формат/ top_k / budget — из профиля (без профиля — markdown);
+- `--task` — запись `usage_log` (знание доступно ДО задачи, ТЗ §10.3);
+- таймаут/ошибка — пустой ответ, задача не блокируется (ТЗ §19);
+- `EVOLVE_INJECT_DEBUG=1` — диагностика в stderr (N элементов, took_ms).
+
 ## Transfer-тест (M5)
 
 Проверка переноса знаний на альтернативный профиль (ТЗ §14.5): top-20

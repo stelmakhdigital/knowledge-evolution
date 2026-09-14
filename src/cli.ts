@@ -1434,6 +1434,70 @@ metaCmd
     }
   });
 
+// inject (Op.1): retrieval-инструмент для реального агента — одна команда:
+// профиль (format/top_k/budget) + retrieval + usage_log. Agent-agnostic (ТЗ §14):
+// агент задаётся --agent <id>, профиль — agent_profiles; без профиля — markdown.
+const injectCmd = new Command("inject")
+  .description("инъекция знаний для агента: retrieval + профиль + usage_log (адаптер, Op.1)");
+
+injectCmd
+  .command("knowledge")
+  .description("evolve inject knowledge --agent <id> --query «...» [--task <id>] [--format f]")
+  .requiredOption("--agent <id>", "agent_id (профиль из agent_profiles; без профиля — markdown)")
+  .requiredOption("--query <text>", "вопрос/контекст задачи")
+  .option("--task <id>", "task_id: запись usage_log (знание доступно ДО задачи, ТЗ §10.3)")
+  .option("--format <f>", "markdown|json|tool_call (иначе — формат профиля)")
+  .option("--db <url>", "connection string", DEFAULT_DB_URL)
+  .action(async (opts: Record<string, string | undefined>, cmd: Command) => {
+    try {
+      const globalOpts = cmd.optsWithGlobals() as ItemOptions & { db?: string };
+      const config = loadConfig(globalOpts.config ?? resolveConfigPath());
+      // --db объявлен глобально (program) и здесь: глобальный приоритетнее
+      // (commander кладёт значение пользователя в program-опцию).
+      const dbUrl = globalOpts["db"] ?? (opts["db"] as string | undefined) ?? DEFAULT_DB_URL;
+      const pool = new Pool({ connectionString: dbUrl });
+      try {
+        const agentId = opts["agent"] as string;
+        const profile = await pool.query(`SELECT * FROM agent_profiles WHERE agent_id = $1`, [agentId]);
+        const profileRow = profile.rows[0];
+        const format = (opts["format"] as ResponseFormat | undefined) ?? (profileRow ? (profileRow["format"] as ResponseFormat) : "markdown");
+        const result = await retrieve(
+          pool,
+          { query: opts["query"] as string, agentId, taskId: opts["task"] as string | undefined },
+          config,
+          new MockLlm(),
+        );
+        if (result.items.length === 0) {
+          console.log(`(evolve: знаний не найдено${result.timedOut ? ", таймаут retrieval — задача не блокируется" : ""}; query: ${(opts["query"] as string).slice(0, 60)})`);
+          return;
+        }
+        const profileObj = profileRow
+          ? { retrievalTopK: Number(profileRow["retrieval_top_k"]), contextBudget: Number(profileRow["context_budget"]) }
+          : null;
+        const out = formatResponse(result, format, profileObj);
+        // markdown: человек/агент читает сам текст (payload — в HTTP-версии)
+        if (
+          format === "markdown" &&
+          typeof out === "object" &&
+          out !== null &&
+          typeof (out as Record<string, unknown>)["markdown"] === "string"
+        ) {
+          console.log((out as { markdown: string }).markdown);
+        } else {
+          console.log(JSON.stringify(out, null, 2));
+        }
+        if (process.env["EVOLVE_INJECT_DEBUG"]) {
+          console.error(`evolve: ${result.items.length} элементов, ${result.tookMs} ms${result.timedOut ? ", TIMED OUT" : ""}`);
+        }
+      } finally {
+        await pool.end();
+      }
+    } catch (err) {
+      fail(err);
+    }
+  });
+
+program.addCommand(injectCmd);
 program.addCommand(metaCmd);
 program.addCommand(ablationCmd);
 program.addCommand(transferCmd);
