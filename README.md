@@ -31,7 +31,20 @@ npm run build
 ### 2. PostgreSQL 16 (+ pgvector, pg_trgm)
 
 Любой из вариантов — setup проверит сам (`export PSQL=/путь/к/psql`, если psql
-не в PATH):
+не в PATH). **Рекомендуемый — Docker**: контейнер поднимается после рестарта
+системы сам (`restart: unless-stopped`), «поднимать после рестарта» не нужно:
+
+- **Docker** (`docker compose.yml` в корне репозитория, образ
+  `pgvector/pgvector:pg16` — pgvector и pg_trgm внутри):
+
+  ```bash
+  docker compose up -d            # БД postgres://evolve:evolve@127.0.0.1:5432/evolve
+  docker compose ps               # healthy?
+  npm run setup -- --db "postgres://evolve:evolve@127.0.0.1:5432/evolve"
+  ```
+
+  Если 5432 занят системным Postgres — поменяйте в compose `5432:5432` на
+  `5433:5432` и укажите тот же порт в `--db`.
 
 - **системный Postgres** (apt/brew/nix): установите PostgreSQL 16 и расширения
   `pg_trgm` (пакет contrib) и `pgvector` (пакет pgvector или сборка из
@@ -59,7 +72,12 @@ npm run build
   ```
 
   После перезагрузки система поднимает кластер той же `pg_ctl`-командой
-  (в DSH-скилле это написано).
+  (в DSH-скилле это написано) либо systemd-юнитом — рецепт ниже.
+
+  Автоподъём без Docker: user-сервис `~/.config/systemd/user/evolve-pg.service`
+  (`ExecStart=~/.pgsql/bin/pg_ctl -D ~/pgsql/data start …`,
+  `systemctl --user enable --now evolve-pg`) или та же `pg_ctl`-команда
+  в `~/.bashrc` (идемпотентно).
 
 ### 3. Одна команда: БД + миграции + профиль + скилл
 

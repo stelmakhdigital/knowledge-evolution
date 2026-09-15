@@ -1,0 +1,37 @@
+# evolve: PostgreSQL 16 + pgvector одним контейнером (опция «Docker» быстрого старта)
+# Запуск:   docker compose up -d
+# Проверка: docker compose ps && docker compose exec evolve-pg pg_isready
+# БД:       postgres://evolve:evolve@127.0.0.1:5432/evolve
+# Данные:   volume evolve_pgdata (переживает пересоздание контейнера);
+#           сам контейнер поднимается после рестарта системы (restart: unless-stopped) —
+#           «поднимать после рестарта» не нужно.
+#
+# Примечания:
+# - pgvector/pgvector:pg16 — официальный образ с pgvector (0.7.x) и pg_trgm (contrib) внутри;
+#   extensions создаются при инициализации, setup.sh их не затирает (IF NOT EXISTS).
+# - пароль «evolve» — для локальной разработки; для сети смените POSTGRES_PASSWORD
+#   и не публикуйте порт наружу (publish только 127.0.0.1:5432).
+# - если 5432 занят системным Postgres: поменяйте «5432:5432» на «5433:5432»
+#   и используйте --db "postgres://evolve:evolve@127.0.0.1:5433/evolve".
+
+services:
+  evolve-pg:
+    image: pgvector/pgvector:pg16
+    container_name: evolve-pg
+    environment:
+      POSTGRES_USER: evolve
+      POSTGRES_PASSWORD: evolve
+      POSTGRES_DB: evolve
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - evolve_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U evolve -d evolve"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  evolve_pgdata:

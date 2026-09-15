@@ -61,6 +61,9 @@
 - [ ] Op.3b: накопление реальных сессий (цель M1: 20 задач) → weekly report с данными (success-rate, churn, canary-итоги)
 - [ ] M6.3: golden-набор задач + golden-эвалуация (промоут правок harness: success-rate ≥ baseline + 5 п.п. И cost ≤ baseline)
 - [x] Op.4: быстрый старт — `npm run setup` (scripts/setup.sh: Postgres-проверка → БД → расширения → миграции → профиль → DSH-скилл из шаблона → smoke-тест) + README «Быстрый старт (новая система)» и «Подключение кодинг-агента» (DSH-скилл / любой bash-агент / HTTP serve); тест setup.sh (идемпотентность)
+- [x] Op.4b: Docker-опция — docker-compose.yml (pgvector/pgvector:pg16, volume, healthcheck,
+  restart: unless-stopped → поднимается после рестарта системы без участия человека) +
+  «Docker» — рекомендуемый вариант в README «Быстрый старт»
 - [x] Фикс commander: глобальный `--db` перехватывал значения субкоманд (дефолт маскировал пользовательский) — единый `dbUrlOf()` (глобальный → локальный → default) во всех PG-командах
 
 ## Требования (Must → user story)
