@@ -1,6 +1,6 @@
 # Roadmap: evolve — система эволюции знания для кодинг-агента
 
-Обновлено: 2026-09-14 · Статус: Op.1–Op.4 готовы (setup-бутстрап, быстрый старт в README); идёт эксплуатация, дальше M6.3 (golden)
+Обновлено: 2026-09-15 · Статус: Op.1–Op.5 готовы (режим «не трогай»: автоциклы + автоподъём БД); идёт эксплуатация, дальше M6.3 (golden)
 Цель: накопление, верификация и применение знаний, повышающих success-rate агента и снижающих повторение ошибок (ТЗ §1) · KPI: success-rate ≥ baseline + 10 п.п. при токенах/задачу ≤ baseline (ТЗ §18)
 
 Источники: `knowledge-evolution-tz.md` (v0.3), `PROJECT_MEMORY.md`.
@@ -64,6 +64,11 @@
 - [x] Op.4b: Docker-опция — docker-compose.yml (pgvector/pgvector:pg16, volume, healthcheck,
   restart: unless-stopped → поднимается после рестарта системы без участия человека) +
   «Docker» — рекомендуемый вариант в README «Быстрый старт»
+- [x] Op.5: режим «не трогай» — scripts/auto.sh (daily: scores/canary/decay; weekly:
+  отчёт в ~/.evolve/reports/; ensure-db: автоподъём Postgres docker→pg_ctl) +
+  scripts/install-auto.sh (systemd user-таймеры 03:30/вс 20:00, Persistent=true;
+  без systemd — cron-строки; loginctl enable-linger для работы без логина);
+  setup.sh пишет ~/.evolve/{db-url,repo}
 - [x] Фикс commander: глобальный `--db` перехватывал значения субкоманд (дефолт маскировал пользовательский) — единый `dbUrlOf()` (глобальный → локальный → default) во всех PG-командах
 
 ## Требования (Must → user story)

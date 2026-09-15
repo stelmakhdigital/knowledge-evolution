@@ -131,6 +131,11 @@ else
   EVOLVE_DB_URL="$DB" node "$REPO/dist/cli.js" inject knowledge --agent "$AGENT" --query "selftest" || true
 fi
 
+# remember БД и путь для auto/install-auto (~/.evolve)
+mkdir -p "$HOME/.evolve"
+printf '%s\n' "$DB" > "$HOME/.evolve/db-url"
+printf '%s\n' "$REPO" > "$HOME/.evolve/repo"
+
 cat <<EOF
 
 Готово. Дальше:

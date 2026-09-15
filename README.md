@@ -288,6 +288,31 @@ retrieval). Смена флага = правка config.yaml + коммит:
 node dist/cli.js ablation list
 ```
 
+## Режим «не трогай»: без ручного наблюдения после рестарта
+
+Цель: система работает сама, участие человека — только при принятии решений
+из очереди/отчётов.
+
+| Слой | Что делает сам |
+|---|---|
+| Postgres | Docker: `restart: unless-stopped` (контейнер поднимается после рестарта); `auto.sh` как запасной: если БД легла — сам поднимает (`docker compose up -d` → home-кластер `pg_ctl`) |
+| Инъекции знаний | по требованию агента (скилл `evolve`) — демонов нет |
+| Циклы (scores, canary, decay) | **systemd user-таймер `evolve-daily`** — каждый день 03:30 |
+| Недельный отчёт | **таймер `evolve-weekly`** — воскресенье 20:00 → `~/.evolve/reports/report-<дата>.md` |
+
+Установка (однократно, после `npm run setup`):
+
+```bash
+bash scripts/install-auto.sh            # юниты + enable; без systemd — cron-строки
+sudo loginctl enable-linger $USER       # таймеры работают и без логина (сразу после включения ПК)
+```
+
+Диагностика: `systemctl --user list-timers | grep evolve` и
+`scripts/auto.sh status` (лог — `~/.evolve/auto.log`). Снять режим:
+`systemctl --user disable --now evolve-daily.timer evolve-weekly.timer`.
+`Persistent=true`: прогоны, пропущенные пока система была выключена, выполняются
+при следующем подъёме.
+
 ## Подключение кодинг-агента
 
 Как прикрутить базу знания к вашему агенту. Agent-agnostic (ТЗ §14):
